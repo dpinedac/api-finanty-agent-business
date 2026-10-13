@@ -1,0 +1,38 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: business-api
+  datasource:
+    url: jdbc:h2:mem:cobranza;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+    defer-datasource-initialization: true
+  sql:
+    init:
+      mode: always
+
+cobranza:
+  # Clave compartida con el agente (cámbiala; en producción usa variable de entorno)
+  api-key: ${COBRANZA_API_KEY:dev-key-cambiar}
+  politica:
+    # Descuento máximo según antigüedad de la mora (cartera castigada)
+    tramos:
+      - { dias-mora-desde: 0,    descuento-maximo: 10 }
+      - { dias-mora-desde: 361,  descuento-maximo: 40 }
+      - { dias-mora-desde: 721,  descuento-maximo: 60 }
+      - { dias-mora-desde: 1081, descuento-maximo: 70 }
+    # Puntos porcentuales que se restan al descuento según número de cuotas
+    reduccion-por-cuotas:
+      1: 0
+      3: 10
+      6: 20
+      12: 30
+    cuota-minima: 50.00
+    dias-max-primer-pago: 15
+    vigencia-oferta-dias: 5
