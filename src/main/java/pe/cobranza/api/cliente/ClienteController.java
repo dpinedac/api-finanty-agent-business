@@ -3,6 +3,7 @@ package pe.cobranza.api.cliente;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -12,13 +13,16 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequestMapping("/api/v1/clientes")
 public class ClienteController {
 
-    private static final int MAX_INTENTOS = 3;
+    /** Intentos máximos de validación por llamada; se configura con COBRANZA_MAX_INTENTOS. */
+    private final int maxIntentos;
     private final ClienteRepository repo;
     /** Intentos fallidos por llamada. En producción iría a Redis. */
     private final Map<String, Integer> intentos = new ConcurrentHashMap<>();
 
-    public ClienteController(ClienteRepository repo) {
+    public ClienteController(ClienteRepository repo,
+                             @Value("${cobranza.validacion.max-intentos:3}") int maxIntentos) {
         this.repo = repo;
+        this.maxIntentos = maxIntentos;
     }
 
     public record VerificarRequest(@NotBlank String documento, @NotNull Integer anioNacimiento, String callId) {}
@@ -39,16 +43,16 @@ public class ClienteController {
     public VerificarResponse verificar(@Valid @RequestBody VerificarRequest req) {
         String clave = req.callId() == null ? req.documento() : req.callId();
         int usados = intentos.getOrDefault(clave, 0);
-        if (usados >= MAX_INTENTOS) {
+        if (usados >= maxIntentos) {
             return new VerificarResponse(false, null, 0, "Se superó el número de intentos de validación.");
         }
         var cliente = repo.findByDocumento(req.documento().trim());
         boolean ok = cliente.isPresent() && req.anioNacimiento().equals(cliente.get().getAnioNacimiento());
         if (ok) {
             intentos.remove(clave);
-            return new VerificarResponse(true, cliente.get().getNombres(), MAX_INTENTOS, "Identidad validada.");
+            return new VerificarResponse(true, cliente.get().getNombres(), maxIntentos, "Identidad validada.");
         }
         intentos.put(clave, usados + 1);
-        return new VerificarResponse(false, null, MAX_INTENTOS - usados - 1, "Los datos no coinciden.");
+        return new VerificarResponse(false, null, maxIntentos - usados - 1, "Los datos no coinciden.");
     }
 }

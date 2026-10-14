@@ -1,13 +1,15 @@
+# Toda clave, URL o parámetro se lee de variables de entorno; los valores por defecto son solo para desarrollo.
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 spring:
   application:
     name: business-api
   datasource:
-    url: jdbc:h2:mem:cobranza;DB_CLOSE_DELAY=-1
-    username: sa
-    password:
+    # En desarrollo H2 en memoria; con el perfil sqlserver las mismas variables apuntan a SQL Server
+    url: ${DB_URL:jdbc:h2:mem:cobranza;DB_CLOSE_DELAY=-1}
+    username: ${DB_USER:sa}
+    password: ${DB_PASSWORD:}
   jpa:
     hibernate:
       ddl-auto: create-drop
@@ -20,6 +22,9 @@ spring:
 cobranza:
   # Clave compartida con el agente (cámbiala; en producción usa variable de entorno)
   api-key: ${COBRANZA_API_KEY:dev-key-cambiar}
+  validacion:
+    # Intentos máximos de verificación de identidad por llamada
+    max-intentos: ${COBRANZA_MAX_INTENTOS:3}
   politica:
     # Descuento máximo según antigüedad de la mora (cartera castigada)
     tramos:
@@ -33,6 +38,6 @@ cobranza:
       3: 10
       6: 20
       12: 30
-    cuota-minima: 50.00
-    dias-max-primer-pago: 15
-    vigencia-oferta-dias: 5
+    cuota-minima: ${COBRANZA_CUOTA_MINIMA:50.00}
+    dias-max-primer-pago: ${COBRANZA_DIAS_MAX_PRIMER_PAGO:15}
+    vigencia-oferta-dias: ${COBRANZA_VIGENCIA_OFERTA_DIAS:5}
