@@ -1,0 +1,856 @@
+openapi: 3.1.0
+info:
+  title: business-api · API de negocio de cobranza
+  version: 0.2.0
+  summary: Reglas de negocio y único escritor en base de datos del agente conversacional de cobranza.
+  description: |
+    API consumida por **agent-voice** (perfiles validador, seguimiento y negociador) y por **back-discador**
+    (lectura de rellamadas). Todas las rutas bajo `/api/` exigen la cabecera `X-API-Key`.
+
+    Reglas que viven aquí y no en el prompt del agente:
+    - Sin identidad validada no se entregan datos de deuda.
+    - Los montos de ofertas y promesas se calculan en el servidor.
+    - La fecha del primer pago de una promesa debe estar entre hoy y el plazo máximo de la política.
+
+    Correlación: `callId` es el `uuid_llamada` de back-discador y el mismo valor que el dialplan entrega a AudioSocket.
+    Con él se enlazan la llamada, sus eventos, la validación de teléfono, las promesas, las rellamadas y el resultado.
+
+    Los cambios de contrato son aditivos: ningún cuerpo existente cambia de forma.
+  contact:
+    name: Finanty · Sistemas
+servers:
+  - url: http://localhost:8080
+    description: Desarrollo local (H2 en memoria con datos sintéticos)
+  - url: http://business-api:8080
+    description: Red interna de docker compose
+
+security:
+  - ApiKey: []
+
+tags:
+  - name: Clientes
+    description: Datos mínimos para saludar y verificación de identidad.
+  - name: Deudas
+    description: Deudas del cliente. Solo después de validar identidad.
+  - name: Ofertas
+    description: Cálculo de descuentos y cuotas según política.
+  - name: Promesas
+    description: Promesas de pago; el monto se recalcula en el servidor.
+  - name: Rellamadas
+    description: Rellamadas agendadas por el agente y leídas por el discador.
+  - name: Llamadas
+    description: "Ciclo de vida de una llamada con agente IA: inicio, eventos, resultado y consulta."
+  - name: Teléfonos
+    description: Resultado de la validación del teléfono marcado.
+
+paths:
+  /api/v1/clientes/{documento}:
+    get:
+      tags: [Clientes]
+      operationId: obtenerClienteResumen
+      summary: Documento y nombre para el saludo
+      description: Precarga para el agente. No revela datos de deuda.
+      parameters:
+        - $ref: '#/components/parameters/Documento'
+      responses:
+        '200':
+          description: Cliente encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClienteResumen'
+              example:
+                documento: '45879632'
+                nombre: Carlos Ramírez Soto
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+
+  /api/v1/clientes/verificar:
+    post:
+      tags: [Clientes]
+      operationId: verificarIdentidad
+      summary: Verifica la identidad con documento y año de nacimiento
+      description: |
+        Máximo de intentos por `callId` (o por documento si no se envía), configurable con
+        `COBRANZA_MAX_INTENTOS`. Superado el máximo responde `verificado: false` con `intentosRestantes: 0`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerificarRequest'
+            example:
+              documento: '45879632'
+              anioNacimiento: 1985
+              callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+      responses:
+        '200':
+          description: Resultado de la verificación (coincida o no).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificarResponse'
+              examples:
+                validado:
+                  value: { verificado: true, nombre: Carlos, intentosRestantes: 3, mensaje: Identidad validada. }
+                noCoincide:
+                  value: { verificado: false, nombre: null, intentosRestantes: 2, mensaje: Los datos no coinciden. }
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+
+  /api/v1/deudas/{documento}:
+    get:
+      tags: [Deudas]
+      operationId: listarDeudas
+      summary: Deudas del cliente
+      description: El agente solo debe invocarlo después de una verificación exitosa.
+      parameters:
+        - $ref: '#/components/parameters/Documento'
+      responses:
+        '200':
+          description: Lista de deudas (vacía si el cliente no tiene o no existe).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Deuda'
+              example:
+                - deudaId: 1
+                  producto: Tarjeta de crédito
+                  entidadOrigen: Banco Andino
+                  saldoTotal: 4850.00
+                  diasMora: 820
+                  estado: VIGENTE
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+
+  /api/v1/ofertas/calcular:
+    post:
+      tags: [Ofertas]
+      operationId: calcularOferta
+      summary: Descuento y cuotas según política
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalcularOfertaRequest'
+            example: { documento: '45879632', deudaId: 1, cuotas: 3 }
+      responses:
+        '200':
+          description: Oferta calculada en el servidor.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Oferta'
+              example:
+                deudaId: 1
+                saldoTotal: 4850.00
+                cuotas: 3
+                porcentajeDescuento: 50
+                montoConDescuento: 2425.00
+                montoCuota: 808.33
+                vigenteHasta: '2026-10-19'
+        '400':
+          description: Número de cuotas no permitido o cuota menor al mínimo.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: 'Número de cuotas no permitido. Opciones: [1, 3, 6, 12]' }
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '403':
+          description: La deuda no pertenece al cliente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          description: La deuda no está VIGENTE.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/promesas:
+    post:
+      tags: [Promesas]
+      operationId: registrarPromesa
+      summary: Registra una promesa de pago
+      description: El monto se recalcula con la política vigente y la deuda pasa a `CON_PROMESA`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromesaRequest'
+            example:
+              documento: '45879632'
+              deudaId: 1
+              cuotas: 3
+              fechaPrimerPago: '2026-10-20'
+              callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+      responses:
+        '200':
+          description: Promesa registrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromesaResponse'
+              example:
+                promesaId: 1
+                cuotas: 3
+                montoTotal: 2425.00
+                montoCuota: 808.33
+                fechaPrimerPago: '2026-10-20'
+                mensaje: Promesa de pago registrada.
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '403':
+          description: La deuda no pertenece al cliente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          description: La deuda no está VIGENTE.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/rellamadas:
+    post:
+      tags: [Rellamadas]
+      operationId: agendarRellamada
+      summary: Agenda una rellamada
+      description: La `fechaHora` debe ser futura. Queda en estado `PENDIENTE` hasta que el discador la reprograme.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RellamadaRequest'
+            example:
+              documento: '45879632'
+              fechaHora: '2026-10-15T15:00:00'
+              motivo: El cliente pidió que lo llamen el jueves a las 3 pm.
+              callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+      responses:
+        '200':
+          description: Rellamada agendada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RellamadaAgendadaResponse'
+              example: { rellamadaId: 1, fechaHora: '2026-10-15T15:00', mensaje: Rellamada agendada. }
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+    get:
+      tags: [Rellamadas]
+      operationId: listarRellamadas
+      summary: Rellamadas para que el discador reprograme
+      description: |
+        Lista las rellamadas agendadas por el agente, ordenadas por `fechaHora` ascendente.
+        - `pendientes=true` devuelve solo las de estado `PENDIENTE` (aún no tomadas por el discador).
+        - `desde` y `hasta` acotan por `fechaHora` (ambos inclusivos, en hora local del servidor).
+      parameters:
+        - name: pendientes
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: Solo rellamadas en estado `PENDIENTE`.
+        - name: desde
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-15T00:00:00'
+          description: Límite inferior de `fechaHora` (inclusive).
+        - name: hasta
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-15T23:59:59'
+          description: Límite superior de `fechaHora` (inclusive).
+      responses:
+        '200':
+          description: Rellamadas que cumplen los filtros (vacío si ninguna).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Rellamada'
+              example:
+                - rellamadaId: 1
+                  documento: '45879632'
+                  fechaHora: '2026-10-15T15:00:00'
+                  motivo: El cliente pidió que lo llamen el jueves a las 3 pm.
+                  callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+                  estado: PENDIENTE
+                  creadaEn: '2026-10-14T10:32:11'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+
+  /api/v1/llamadas:
+    post:
+      tags: [Llamadas]
+      operationId: iniciarLlamada
+      summary: Registra el inicio de una llamada con agente IA
+      description: |
+        Se invoca al iniciar la sesión del agente, antes del saludo. `callId` es el `uuid_llamada` del discador.
+        `guionHash` identifica la versión del guion de campaña que interpretó el agente.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IniciarLlamadaRequest'
+            example:
+              callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+              documento: '45879632'
+              telefono: '51987654321'
+              perfil: validador
+              campana: VALIDACION-OCT-2026
+              guionHash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+      responses:
+        '201':
+          description: Llamada registrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlamadaIniciadaResponse'
+              example:
+                llamadaId: 1
+                callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+                inicio: '2026-10-14T10:30:00'
+                mensaje: Llamada registrada.
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '409':
+          description: Ya existe una llamada con ese `callId`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: Ya existe una llamada con ese callId }
+
+  /api/v1/llamadas/{callId}:
+    get:
+      tags: [Llamadas]
+      operationId: obtenerLlamada
+      summary: Llamada con su resultado y sus eventos
+      description: |
+        Devuelve la llamada registrada con `POST /api/v1/llamadas`, el último resultado registrado
+        (`null` si aún no cerró) y los eventos de herramientas en orden cronológico.
+      parameters:
+        - $ref: '#/components/parameters/CallId'
+      responses:
+        '200':
+          description: Llamada encontrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LlamadaDetalle'
+              example:
+                llamadaId: 1
+                callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+                documento: '45879632'
+                telefono: '51987654321'
+                perfil: validador
+                campana: VALIDACION-OCT-2026
+                guionHash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+                inicio: '2026-10-14T10:30:00'
+                fin: '2026-10-14T10:31:20'
+                resultado:
+                  resultadoId: 1
+                  tipificacion: CONTACTO_VALIDADO
+                  resumen: El cliente confirmó su identidad y el número.
+                  guionHash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+                  resumenEstructurado: { identidadValidada: true, telefonoCorrecto: true }
+                  transcripcion: "Agente: Buenas tardes...\nCliente: Sí, soy yo."
+                  registradoEn: '2026-10-14T10:31:20'
+                eventos:
+                  - eventoId: 1
+                    herramienta: verificar_identidad
+                    argumentos: { documento: '45879632', anioNacimiento: 1985 }
+                    respuesta: { verificado: true, nombre: Carlos }
+                    timestamp: '2026-10-14T10:30:25'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+
+  /api/v1/llamadas/{callId}/eventos:
+    post:
+      tags: [Llamadas]
+      operationId: registrarEventoLlamada
+      summary: Registra una herramienta ejecutada durante la llamada
+      description: |
+        Cada herramienta que el agente invoca queda registrada con sus argumentos y su respuesta en JSON.
+        `timestamp` es opcional; si no viene se usa la hora del servidor. La llamada debe existir.
+      parameters:
+        - $ref: '#/components/parameters/CallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventoLlamadaRequest'
+            example:
+              herramienta: verificar_identidad
+              argumentos: { documento: '45879632', anioNacimiento: 1985 }
+              respuesta: { verificado: true, nombre: Carlos, intentosRestantes: 3 }
+              timestamp: '2026-10-14T10:30:25'
+      responses:
+        '201':
+          description: Evento registrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventoRegistradoResponse'
+              example: { eventoId: 1, mensaje: Evento registrado. }
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+
+  /api/v1/llamadas/{callId}/resultado:
+    post:
+      tags: [Llamadas]
+      operationId: registrarResultadoLlamada
+      summary: Tipificación final de la llamada
+      description: |
+        Cuerpo original: `documento`, `tipificacion` y `resumen`. Campos aditivos opcionales: `guionHash`,
+        `transcripcion` (texto largo) y `resumenEstructurado` (objeto JSON libre).
+        Si existe la llamada registrada con `POST /api/v1/llamadas`, se marca su fecha de fin.
+        No exige que la llamada exista (compatibilidad con clientes previos).
+      parameters:
+        - $ref: '#/components/parameters/CallId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResultadoLlamadaRequest'
+            examples:
+              cuerpoOriginal:
+                summary: Cuerpo original (sigue siendo válido)
+                value:
+                  documento: '45879632'
+                  tipificacion: RELLAMADA
+                  resumen: El cliente pidió que lo llamen el jueves a las 3 pm.
+              cuerpoAmpliado:
+                summary: Cuerpo ampliado del validador
+                value:
+                  documento: '45879632'
+                  tipificacion: CONTACTO_VALIDADO
+                  resumen: El cliente confirmó su identidad y el número.
+                  guionHash: 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+                  transcripcion: "Agente: Buenas tardes, le saluda Lucía de Finanty...\nCliente: Sí, soy yo."
+                  resumenEstructurado:
+                    identidadValidada: true
+                    telefonoCorrecto: true
+                    duracionSeg: 58
+      responses:
+        '200':
+          description: Resultado registrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultadoRegistradoResponse'
+              example: { resultadoId: 1, mensaje: Resultado registrado. }
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+
+  /api/v1/telefonos/validacion:
+    post:
+      tags: [Teléfonos]
+      operationId: registrarValidacionTelefono
+      summary: Registra el resultado de validar el teléfono marcado
+      description: |
+        Lo envía el perfil validador cuando determina a quién pertenece el número marcado.
+        `resultado` usa el subconjunto de tipificaciones propio de la validación.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidacionTelefonoRequest'
+            example:
+              documento: '45879632'
+              telefono: '51987654321'
+              resultado: CONTACTO_VALIDADO
+              callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+      responses:
+        '201':
+          description: Validación registrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidacionRegistradaResponse'
+              example: { validacionId: 1, resultado: CONTACTO_VALIDADO, mensaje: Validación registrada. }
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Clave compartida entre servicios. En el servidor se configura con la variable `COBRANZA_API_KEY`.
+
+  parameters:
+    Documento:
+      name: documento
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 15
+      example: '45879632'
+      description: Documento de identidad del cliente.
+    CallId:
+      name: callId
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 64
+      example: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+      description: Identificador de la llamada (`uuid_llamada` del discador).
+
+  responses:
+    NoAutorizado:
+      description: Falta la cabecera `X-API-Key` o no coincide.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: API key inválida }
+    NoEncontrado:
+      description: El recurso no existe.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: Cliente no encontrado }
+    DatosInvalidos:
+      description: El cuerpo o los parámetros no pasan la validación.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example: { error: 'documento: must not be blank' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Mensaje legible; el agente lo explica al cliente cuando corresponde.
+
+    Tipificacion:
+      type: string
+      description: |
+        Catálogo de tipificaciones del agente. Las ocho primeras existían desde la fase 1;
+        `CONTACTO_VALIDADO`, `NO_EXISTE`, `INFORMADO` y `PROMESA_SIMPLE` se agregaron para el validador y el seguimiento.
+        El mapeo a las tipificaciones del discador (CONTACTO, AGENDAMIENTO, CONTACTO_INDIRECTO, NO_CONTACTO) vive en back-discador.
+      enum:
+        - PROMESA_PAGO
+        - RELLAMADA
+        - RECHAZO
+        - TERCERO
+        - NUMERO_EQUIVOCADO
+        - TRANSFERIDO
+        - SIN_VALIDAR
+        - OTRO
+        - CONTACTO_VALIDADO
+        - NO_EXISTE
+        - INFORMADO
+        - PROMESA_SIMPLE
+
+    ResultadoValidacionTelefono:
+      type: string
+      description: Subconjunto de tipificaciones que describe a quién pertenece el teléfono marcado.
+      enum:
+        - CONTACTO_VALIDADO
+        - TERCERO
+        - NUMERO_EQUIVOCADO
+        - SIN_VALIDAR
+        - NO_EXISTE
+
+    Perfil:
+      type: string
+      description: Perfil del agente que atendió la llamada; lo define el tipo de campaña en back-discador.
+      enum: [validador, seguimiento, negociador]
+
+    ClienteResumen:
+      type: object
+      required: [documento, nombre]
+      properties:
+        documento: { type: string }
+        nombre: { type: string, description: Nombres y apellidos. }
+
+    VerificarRequest:
+      type: object
+      required: [documento, anioNacimiento]
+      properties:
+        documento: { type: string }
+        anioNacimiento: { type: integer, example: 1985 }
+        callId: { type: string, description: Clave del contador de intentos. Si falta, se usa el documento. }
+
+    VerificarResponse:
+      type: object
+      required: [verificado, intentosRestantes, mensaje]
+      properties:
+        verificado: { type: boolean }
+        nombre: { type: [string, 'null'], description: Nombres del cliente solo si se validó. }
+        intentosRestantes: { type: integer }
+        mensaje: { type: string }
+
+    Deuda:
+      type: object
+      required: [deudaId, producto, entidadOrigen, saldoTotal, diasMora, estado]
+      properties:
+        deudaId: { type: integer, format: int64 }
+        producto: { type: string }
+        entidadOrigen: { type: string }
+        saldoTotal: { type: number, format: decimal, example: 4850.00 }
+        diasMora: { type: integer }
+        estado:
+          type: string
+          enum: [VIGENTE, CON_PROMESA, PAGADA]
+
+    CalcularOfertaRequest:
+      type: object
+      required: [documento, deudaId, cuotas]
+      properties:
+        documento: { type: string }
+        deudaId: { type: integer, format: int64 }
+        cuotas: { type: integer, minimum: 1, description: Debe ser una de las opciones de la política (1, 3, 6, 12 por defecto). }
+
+    Oferta:
+      type: object
+      required: [deudaId, saldoTotal, cuotas, porcentajeDescuento, montoConDescuento, montoCuota, vigenteHasta]
+      properties:
+        deudaId: { type: integer, format: int64 }
+        saldoTotal: { type: number, format: decimal }
+        cuotas: { type: integer }
+        porcentajeDescuento: { type: integer }
+        montoConDescuento: { type: number, format: decimal }
+        montoCuota: { type: number, format: decimal }
+        vigenteHasta: { type: string, format: date }
+
+    PromesaRequest:
+      type: object
+      required: [documento, deudaId, cuotas, fechaPrimerPago]
+      properties:
+        documento: { type: string }
+        deudaId: { type: integer, format: int64 }
+        cuotas: { type: integer, minimum: 1 }
+        fechaPrimerPago: { type: string, format: date, description: Entre hoy y el plazo máximo de la política. }
+        callId: { type: string }
+
+    PromesaResponse:
+      type: object
+      required: [promesaId, cuotas, montoTotal, montoCuota, fechaPrimerPago, mensaje]
+      properties:
+        promesaId: { type: integer, format: int64 }
+        cuotas: { type: integer }
+        montoTotal: { type: number, format: decimal }
+        montoCuota: { type: number, format: decimal }
+        fechaPrimerPago: { type: string, format: date }
+        mensaje: { type: string }
+
+    RellamadaRequest:
+      type: object
+      required: [documento, fechaHora]
+      properties:
+        documento: { type: string }
+        fechaHora: { type: string, format: date-time, description: Fecha y hora local futura, sin zona (`2026-10-15T15:00:00`). }
+        motivo: { type: string }
+        callId: { type: string }
+
+    RellamadaAgendadaResponse:
+      type: object
+      required: [rellamadaId, fechaHora, mensaje]
+      properties:
+        rellamadaId: { type: integer, format: int64 }
+        fechaHora: { type: string, description: La fecha recibida, en formato ISO local. }
+        mensaje: { type: string }
+
+    Rellamada:
+      type: object
+      required: [rellamadaId, documento, fechaHora, estado, creadaEn]
+      properties:
+        rellamadaId: { type: integer, format: int64 }
+        documento: { type: string }
+        fechaHora: { type: string, format: date-time }
+        motivo: { type: [string, 'null'] }
+        callId: { type: [string, 'null'] }
+        estado:
+          type: string
+          enum: [PENDIENTE, PROGRAMADA]
+          description: '`PENDIENTE` hasta que el discador la tome. `PROGRAMADA` se reserva para un endpoint aditivo futuro.'
+        creadaEn: { type: string, format: date-time }
+
+    IniciarLlamadaRequest:
+      type: object
+      required: [callId, documento, telefono, perfil]
+      properties:
+        callId: { type: string, maxLength: 64, description: '`uuid_llamada` del discador.' }
+        documento: { type: string, maxLength: 15 }
+        telefono: { type: string, maxLength: 20, description: Número marcado, con código de país si lo envía el discador. }
+        perfil: { $ref: '#/components/schemas/Perfil' }
+        campana: { type: string, maxLength: 100, description: Identificador o nombre de la campaña del discador. }
+        guionHash: { type: string, maxLength: 64, description: Hash (SHA-256 hex) del guion interpretado por el agente. }
+
+    LlamadaIniciadaResponse:
+      type: object
+      required: [llamadaId, callId, inicio, mensaje]
+      properties:
+        llamadaId: { type: integer, format: int64 }
+        callId: { type: string }
+        inicio: { type: string, format: date-time }
+        mensaje: { type: string }
+
+    EventoLlamadaRequest:
+      type: object
+      required: [herramienta]
+      properties:
+        herramienta: { type: string, maxLength: 100, description: Nombre de la herramienta ejecutada por el agente. }
+        argumentos:
+          type: [object, 'null']
+          additionalProperties: true
+          description: Argumentos con los que se invocó, tal como los recibió la herramienta.
+        respuesta:
+          description: Respuesta devuelta por la herramienta. Cualquier valor JSON.
+        timestamp: { type: string, format: date-time, description: Momento de la ejecución. Por defecto, la hora del servidor. }
+
+    EventoRegistradoResponse:
+      type: object
+      required: [eventoId, mensaje]
+      properties:
+        eventoId: { type: integer, format: int64 }
+        mensaje: { type: string }
+
+    EventoLlamada:
+      type: object
+      required: [eventoId, herramienta, timestamp]
+      properties:
+        eventoId: { type: integer, format: int64 }
+        herramienta: { type: string }
+        argumentos:
+          type: [object, 'null']
+          additionalProperties: true
+        respuesta:
+          description: Cualquier valor JSON o `null`.
+        timestamp: { type: string, format: date-time }
+
+    ResultadoLlamadaRequest:
+      type: object
+      required: [tipificacion]
+      properties:
+        documento: { type: string }
+        tipificacion: { $ref: '#/components/schemas/Tipificacion' }
+        resumen: { type: string, maxLength: 2000, description: Resumen breve en lenguaje natural. }
+        guionHash: { type: string, maxLength: 64, description: Aditivo. Hash del guion interpretado. }
+        transcripcion: { type: string, description: Aditivo. Transcripción completa de la conversación. }
+        resumenEstructurado:
+          type: [object, 'null']
+          additionalProperties: true
+          description: Aditivo. Resumen estructurado que define cada perfil del agente.
+
+    ResultadoRegistradoResponse:
+      type: object
+      required: [resultadoId, mensaje]
+      properties:
+        resultadoId: { type: integer, format: int64 }
+        mensaje: { type: string }
+
+    ResultadoLlamada:
+      type: object
+      required: [resultadoId, tipificacion, registradoEn]
+      properties:
+        resultadoId: { type: integer, format: int64 }
+        tipificacion: { $ref: '#/components/schemas/Tipificacion' }
+        resumen: { type: [string, 'null'] }
+        guionHash: { type: [string, 'null'] }
+        resumenEstructurado:
+          type: [object, 'null']
+          additionalProperties: true
+        transcripcion: { type: [string, 'null'] }
+        registradoEn: { type: string, format: date-time }
+
+    LlamadaDetalle:
+      type: object
+      required: [llamadaId, callId, documento, telefono, perfil, inicio, eventos]
+      properties:
+        llamadaId: { type: integer, format: int64 }
+        callId: { type: string }
+        documento: { type: string }
+        telefono: { type: string }
+        perfil: { $ref: '#/components/schemas/Perfil' }
+        campana: { type: [string, 'null'] }
+        guionHash: { type: [string, 'null'] }
+        inicio: { type: string, format: date-time }
+        fin: { type: [string, 'null'], format: date-time, description: Se fija al registrar el resultado. }
+        resultado:
+          oneOf:
+            - $ref: '#/components/schemas/ResultadoLlamada'
+            - type: 'null'
+        eventos:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventoLlamada'
+
+    ValidacionTelefonoRequest:
+      type: object
+      required: [documento, telefono, resultado, callId]
+      properties:
+        documento: { type: string, maxLength: 15 }
+        telefono: { type: string, maxLength: 20 }
+        resultado: { $ref: '#/components/schemas/ResultadoValidacionTelefono' }
+        callId: { type: string, maxLength: 64 }
+
+    ValidacionRegistradaResponse:
+      type: object
+      required: [validacionId, resultado, mensaje]
+      properties:
+        validacionId: { type: integer, format: int64 }
+        resultado: { $ref: '#/components/schemas/ResultadoValidacionTelefono' }
+        mensaje: { type: string }
