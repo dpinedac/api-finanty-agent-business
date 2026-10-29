@@ -19,7 +19,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-@TestPropertySource(properties = "cobranza.api-key=" + PruebaApi.API_KEY)
+@TestPropertySource(properties = {
+        "cobranza.api-key=" + PruebaApi.API_KEY,
+        // CNTSEC simulada en H2 con datos sintéticos; el registro de gestión se prueba contra esa copia
+        "cntsec.datasource.url=jdbc:h2:mem:cntsec;MODE=MSSQLServer;DB_CLOSE_DELAY=-1",
+        "cntsec.datasource.username=sa",
+        "cntsec.datasource.init-script=classpath:cntsec-h2.sql"
+})
 public abstract class PruebaApi {
 
     public static final String API_KEY = "clave-de-prueba";

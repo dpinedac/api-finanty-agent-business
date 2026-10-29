@@ -1,0 +1,66 @@
+-- CNTSEC SIMULADA EN H2 (modo MSSQLServer) para pruebas y desarrollo sin red.
+-- Solo las tablas y columnas de CobraTwo que usa la API. DATOS SINTÉTICOS: nunca datos reales (Ley 29733).
+-- Se activa con CNTSEC_URL=jdbc:h2:mem:cntsec;MODE=MSSQLServer;DB_CLOSE_DELAY=-1 y CNTSEC_INIT_SCRIPT=classpath:cntsec-h2.sql
+
+CREATE TABLE IF NOT EXISTS COBTM08 (            -- TM_CLIENTECB
+    TM08NCLIID  INT PRIMARY KEY,
+    TG01NCLITDC INT NOT NULL,                   -- tipo de documento (14 = DNI)
+    TM08SCLIDOC VARCHAR(20) UNIQUE,
+    TM08SCLINOM VARCHAR(150),
+    TM08SCLIAPP VARCHAR(50),
+    TM08SCLIAPM VARCHAR(50),
+    TG01NCLITIP INT,                            -- 309 natural, 308 jurídico
+    TG01NCLIEST INT,
+    TG01NCLISIT INT,                            -- 422 deudor, 423 fallecido
+    TM08DCLINAC DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS COBTM15 (            -- TM_DEUDACB
+    TM15NDEUID  INT PRIMARY KEY,
+    TM08NCLIID  INT,
+    TM15NDEUOPE BIGINT,
+    TG01NMONID  INT,                            -- 411 soles, 410 dólares
+    TG01NDEUSIT INT,                            -- 417 vigente, 418 cancelado
+    TM15NDEUCAPINI DECIMAL(18,2),
+    TM15NDEUINI DECIMAL(18,2)
+);
+
+CREATE TABLE IF NOT EXISTS COBTT02 (            -- TT_NEGOCIACIONCB
+    TT02NNEGID  INT PRIMARY KEY,
+    TG01NNEGTIP INT,
+    TM15NDEUID  INT,
+    TG01NNEGSIT INT                             -- 554 vigente
+);
+
+CREATE TABLE IF NOT EXISTS AGENTEIATT01 (       -- TT_VALIDACION_LLAMADA_IA, tabla propia del agente (specs/sql/AGENTEIATT01.sql)
+    TT01NVALLLAID    INT IDENTITY PRIMARY KEY,
+    TT01SCALLID      VARCHAR(64) NOT NULL UNIQUE,
+    TM08NCLIID       INT,
+    TT01SCLIDOC      VARCHAR(20) NOT NULL,
+    TT01STELEFONO    VARCHAR(20) NOT NULL,
+    TT01DLLAMADA     DATETIME NOT NULL,
+    TT01DCOLGADO     DATETIME,
+    TT01NDURACIONSEG INT,
+    TT01BESCLIENTE   BIT NOT NULL,
+    TT01SRESULTADO   VARCHAR(30) NOT NULL,
+    TT01SRESUMEN     VARCHAR(2000),
+    TT01DREGISTRO    DATETIME NOT NULL
+);
+
+MERGE INTO COBTM08 KEY (TM08NCLIID) VALUES
+ (1, 14, '45879632', 'Carlos',  'Ramírez', 'Soto',   309, 3, 422, '1985-03-10'),
+ (2, 14, '70123456', 'María',   'Quispe',  'Huamán', 309, 3, 422, '1992-07-21'),
+ (3, 14, '10293847', 'Jorge',   'Salazar', 'Prado',  309, 3, 422, '1978-11-02'),
+ (4, 14, '33445566', 'Rosa',    'Vega',    'Luna',   309, 3, 423, '1950-01-15'),
+ (5, 14, '55667788', 'Pedro',   'Castro',  'Díaz',   309, 3, 422, '1980-05-05');
+
+MERGE INTO COBTM15 KEY (TM15NDEUID) VALUES
+ (101, 1, 90000001, 411, 417, 3200.00, 4850.00),
+ (102, 2, 90000002, 411, 417, 1500.00, 2100.00),
+ (103, 3, 90000003, 411, 417, 9800.00, 15200.00),
+ (104, 3, 90000004, 411, 417, 5000.00, 6400.00),
+ (105, 4, 90000005, 411, 417, 800.00, 1200.00),
+ (106, 5, 90000006, 411, 418, 700.00, 900.00);
+
+MERGE INTO COBTT02 KEY (TT02NNEGID) VALUES
+ (501, 549, 104, 554);

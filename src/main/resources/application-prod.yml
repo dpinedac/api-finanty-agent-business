@@ -1,0 +1,7 @@
+# Producción: java -jar app.jar --spring.profiles.active=prod
+# Idéntico a desarrollo salvo el servidor de CNTSEC. Credenciales siempre por CNTSEC_USER y CNTSEC_PASSWORD.
+# Si la BD propia de la API también va en SQL Server, combina perfiles: --spring.profiles.active=prod,sqlserver
+cntsec:
+  datasource:
+    # Nombre del servidor SQL Server de CNTSEC en producción (reemplazar SERVIDOR_PRODUCCION o definir CNTSEC_HOST)
+    host: ${CNTSEC_HOST:SERVIDOR_PRODUCCION}

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 import org.yaml.snakeyaml.Yaml;
+import pe.cobranza.api.cliente.ClienteController;
 import pe.cobranza.api.llamada.Perfil;
 import pe.cobranza.api.llamada.ResultadoLlamada;
 import pe.cobranza.api.telefono.ValidacionTelefono;
@@ -80,6 +81,8 @@ class ContratoOpenApiTest extends PruebaApi {
                 .containsExactlyInAnyOrderElementsOf(nombres(ValidacionTelefono.Resultado.values()));
         assertThat((List<String>) esquemas.get("Perfil").get("enum"))
                 .containsExactlyInAnyOrder(Arrays.stream(Perfil.values()).map(Perfil::valor).toArray(String[]::new));
+        assertThat((List<String>) esquemas.get("MotivoNoLlamable").get("enum"))
+                .containsExactlyInAnyOrderElementsOf(nombres(ClienteController.MotivoNoLlamable.values()));
     }
 
     @Test

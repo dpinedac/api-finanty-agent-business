@@ -48,8 +48,11 @@ paths:
     get:
       tags: [Clientes]
       operationId: obtenerClienteResumen
-      summary: Documento y nombre para el saludo
-      description: Precarga para el agente. No revela datos de deuda.
+      summary: Documento, nombre y si se le puede llamar
+      description: |
+        Precarga para el discador y el saludo, leída de CNTSEC (COBTM08). No revela datos de deuda.
+        `llamable` es false (con `motivoNoLlamable`) si el cliente está fallecido, no tiene deuda vigente
+        o tiene una negociación vigente: en esos casos no se origina la llamada.
       parameters:
         - $ref: '#/components/parameters/Documento'
       responses:
@@ -59,9 +62,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ClienteResumen'
-              example:
-                documento: '45879632'
-                nombre: Carlos Ramírez Soto
+              examples:
+                llamable:
+                  value: { documento: '45879632', nombre: Carlos Ramírez Soto, nombres: Carlos, apellidos: Ramírez Soto, llamable: true, motivoNoLlamable: null }
+                fallecido:
+                  value: { documento: '33445566', nombre: Rosa Vega Luna, nombres: Rosa, apellidos: Vega Luna, llamable: false, motivoNoLlamable: FALLECIDO }
         '401':
           $ref: '#/components/responses/NoAutorizado'
         '404':
@@ -71,20 +76,31 @@ paths:
     post:
       tags: [Clientes]
       operationId: verificarIdentidad
-      summary: Verifica la identidad con documento y año de nacimiento
+      summary: Verifica la identidad con la confirmación del titular y los primeros dígitos del documento
       description: |
-        Máximo de intentos por `callId` (o por documento si no se envía), configurable con
-        `COBRANZA_MAX_INTENTOS`. Superado el máximo responde `verificado: false` con `intentosRestantes: 0`.
+        Valida contra CNTSEC. Requiere `confirmaIdentidad: true` y `digitosDocumento` igual a los primeros
+        dígitos del documento (`COBRANZA_DIGITOS_DOCUMENTO`, 4 por defecto). Máximo de intentos por `callId`
+        (o por documento si no se envía), configurable con `COBRANZA_MAX_INTENTOS`. Superado el máximo responde
+        `verificado: false` con `intentosRestantes: 0`. Sin ningún dato de control responde `400`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/VerificarRequest'
-            example:
-              documento: '45879632'
-              anioNacimiento: 1985
-              callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+            examples:
+              porDigitos:
+                value:
+                  documento: '45879632'
+                  confirmaIdentidad: true
+                  digitosDocumento: '4587'
+                  callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+              porAnioNacimiento:
+                description: Compatibilidad con el contrato anterior.
+                value:
+                  documento: '45879632'
+                  anioNacimiento: 1985
+                  callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
       responses:
         '200':
           description: Resultado de la verificación (coincida o no).
@@ -495,9 +511,11 @@ paths:
     post:
       tags: [Teléfonos]
       operationId: registrarValidacionTelefono
-      summary: Registra el resultado de validar el teléfono marcado
+      summary: Registra el resultado de la llamada de validación en CNTSEC
       description: |
-        Lo envía el perfil validador cuando determina a quién pertenece el número marcado.
+        Lo envía el perfil validador al cerrar la llamada. Guarda en la tabla propia del agente
+        `AGENTEIATT01` de CNTSEC: cliente, teléfono, fecha en que contestó, fecha en que colgó, duración,
+        resumen, si es o no el cliente y fecha de registro. No escribe en las tablas de CobraTwo.
         `resultado` usa el subconjunto de tipificaciones propio de la validación.
       requestBody:
         required: true
@@ -510,6 +528,9 @@ paths:
               telefono: '51987654321'
               resultado: CONTACTO_VALIDADO
               callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+              inicioLlamada: '2026-10-29T10:15:00'
+              finLlamada: '2026-10-29T10:17:30'
+              resumen: El titular confirmó su identidad con los primeros dígitos del DNI.
       responses:
         '201':
           description: Validación registrada.
@@ -517,11 +538,17 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ValidacionRegistradaResponse'
-              example: { validacionId: 1, resultado: CONTACTO_VALIDADO, mensaje: Validación registrada. }
+              example: { validacionId: 1, resultado: CONTACTO_VALIDADO, mensaje: Validación registrada., esCliente: true, duracionSegundos: 150 }
         '400':
           $ref: '#/components/responses/DatosInvalidos'
         '401':
           $ref: '#/components/responses/NoAutorizado'
+        '409':
+          description: Ya existe una validación con ese `callId`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
 components:
   securitySchemes:
@@ -618,19 +645,40 @@ components:
       description: Perfil del agente que atendió la llamada; lo define el tipo de campaña en back-discador.
       enum: [validador, seguimiento, negociador]
 
+    MotivoNoLlamable:
+      type: string
+      description: Por qué el agente no debe llamar al cliente (regla de negocio, no del prompt).
+      enum: [FALLECIDO, SIN_DEUDA_VIGENTE, NEGOCIACION_VIGENTE]
+
     ClienteResumen:
       type: object
-      required: [documento, nombre]
+      required: [documento, nombre, llamable]
       properties:
         documento: { type: string }
-        nombre: { type: string, description: Nombres y apellidos. }
+        nombre: { type: string, description: Nombres y apellidos (razón social en personas jurídicas). }
+        nombres: { type: [string, 'null'] }
+        apellidos: { type: [string, 'null'] }
+        llamable:
+          type: boolean
+          description: "false si está fallecido, no tiene deuda vigente o tiene una negociación vigente."
+        motivoNoLlamable:
+          oneOf:
+            - $ref: '#/components/schemas/MotivoNoLlamable'
+            - type: 'null'
+          description: Presente solo cuando llamable es false.
 
     VerificarRequest:
       type: object
-      required: [documento, anioNacimiento]
+      required: [documento]
+      description: |
+        Vía principal: `confirmaIdentidad` (el interlocutor dijo "sí, soy yo" / "sí, él habla") junto con
+        `digitosDocumento` (los primeros `COBRANZA_DIGITOS_DOCUMENTO` dígitos, 4 por defecto). Ambos son
+        necesarios: la confirmación verbal sola no valida. `anioNacimiento` se conserva por compatibilidad.
       properties:
         documento: { type: string }
-        anioNacimiento: { type: integer, example: 1985 }
+        confirmaIdentidad: { type: boolean, description: El interlocutor confirmó ser el titular. }
+        digitosDocumento: { type: string, example: '4587', description: Primeros dígitos del documento dichos por el cliente. }
+        anioNacimiento: { type: integer, example: 1985, deprecated: true }
         callId: { type: string, description: Clave del contador de intentos. Si falta, se usa el documento. }
 
     VerificarResponse:
@@ -841,16 +889,26 @@ components:
     ValidacionTelefonoRequest:
       type: object
       required: [documento, telefono, resultado, callId]
+      description: |
+        Se registra en la tabla `AGENTEIATT01` (`TT_VALIDACION_LLAMADA_IA`) de CNTSEC. `inicioLlamada` es el momento
+        en que contestaron y `finLlamada` el momento en que colgaron (hora local, ISO-8601). Si falta `inicioLlamada`
+        se usa la hora del servidor; la duración se calcula entre ambos salvo que se envíe `duracionSegundos`.
       properties:
         documento: { type: string, maxLength: 15 }
-        telefono: { type: string, maxLength: 20 }
+        telefono: { type: string, maxLength: 20, description: Número marcado, tal como vino en la lista del discador. }
         resultado: { $ref: '#/components/schemas/ResultadoValidacionTelefono' }
-        callId: { type: string, maxLength: 64 }
+        callId: { type: string, maxLength: 64, description: Único por llamada; repetirlo responde 409. }
+        inicioLlamada: { type: string, format: date-time, example: '2026-10-29T10:15:00' }
+        finLlamada: { type: string, format: date-time, example: '2026-10-29T10:17:30' }
+        duracionSegundos: { type: integer, minimum: 0, description: Desde que contestó hasta que colgó. Opcional si van las dos fechas. }
+        resumen: { type: string, maxLength: 2000, description: Resumen de la llamada generado por el agente. }
 
     ValidacionRegistradaResponse:
       type: object
-      required: [validacionId, resultado, mensaje]
+      required: [validacionId, resultado, mensaje, esCliente]
       properties:
-        validacionId: { type: integer, format: int64 }
+        validacionId: { type: integer, format: int64, description: Id en AGENTEIATT01. }
         resultado: { $ref: '#/components/schemas/ResultadoValidacionTelefono' }
         mensaje: { type: string }
+        esCliente: { type: boolean, description: true solo con CONTACTO_VALIDADO. }
+        duracionSegundos: { type: [integer, 'null'] }

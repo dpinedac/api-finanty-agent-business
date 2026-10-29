@@ -1,23 +1,44 @@
 # Toda clave, URL o parámetro se lee de variables de entorno; los valores por defecto son solo para desarrollo.
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8085}
 
 spring:
   application:
     name: business-api
   datasource:
-    # En desarrollo H2 en memoria; con el perfil sqlserver las mismas variables apuntan a SQL Server
+    # BD PROPIA de la API (llamadas, eventos, resultados, validaciones, promesas, rellamadas).
+    # En desarrollo H2 en memoria; con el perfil sqlserver las mismas variables apuntan a una BD propia en SQL Server.
+    # Nunca apuntes esta URL a CNTSEC: CNTSEC se consulta con la fuente de datos `cntsec` de abajo.
     url: ${DB_URL:jdbc:h2:mem:cobranza;DB_CLOSE_DELAY=-1}
     username: ${DB_USER:sa}
     password: ${DB_PASSWORD:}
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      # Solo para H2; GuardaEsquema aborta el arranque si hay create-drop/update contra otra BD.
+      ddl-auto: ${JPA_DDL_AUTO:create-drop}
     open-in-view: false
     defer-datasource-initialization: true
   sql:
     init:
-      mode: always
+      mode: ${SQL_INIT_MODE:always}
+
+# Core de cobranza CobraTwo (BD CNTSEC). Fuente de datos de SOLO LECTURA salvo el registro de gestión.
+# Desarrollo: servidor FNTSRVD4. Producción: perfil `prod` (application-prod.yml), que solo cambia el servidor.
+cntsec:
+  datasource:
+    host: ${CNTSEC_HOST:FNTSRVD4}
+    url: ${CNTSEC_URL:jdbc:sqlserver://${cntsec.datasource.host}:1433;databaseName=CNTSEC;encrypt=true;trustServerCertificate=true}
+    username: ${CNTSEC_USER:}
+    password: ${CNTSEC_PASSWORD:}
+    # Script opcional para una CNTSEC simulada en H2 (pruebas y desarrollo sin red): classpath:cntsec-h2.sql
+    init-script: ${CNTSEC_INIT_SCRIPT:}
+    max-pool-size: ${CNTSEC_POOL:5}
+  # Ids del catálogo COBTG01 (TM_GENERALCB) que usan las consultas
+  catalogo:
+    deuda-vigente: 417          # TIP_SIT_VIG
+    negociacion-vigente: 554    # TIP_STNEG_VIG
+    cliente-fallecido: 423      # TIP_SIT_FA
+  # La única escritura en CNTSEC es la tabla propia del agente AGENTEIATT01 (specs/sql/AGENTEIATT01.sql).
 
 cobranza:
   # Clave compartida con el agente (cámbiala; en producción usa variable de entorno)
@@ -25,6 +46,8 @@ cobranza:
   validacion:
     # Intentos máximos de verificación de identidad por llamada
     max-intentos: ${COBRANZA_MAX_INTENTOS:3}
+    # Cantidad de dígitos iniciales del documento que el cliente debe decir para validarse
+    digitos-documento: ${COBRANZA_DIGITOS_DOCUMENTO:4}
   politica:
     # Descuento máximo según antigüedad de la mora (cartera castigada)
     tramos:
