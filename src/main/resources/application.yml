@@ -28,8 +28,8 @@ cntsec:
   datasource:
     host: ${CNTSEC_HOST:FNTSRVD4}
     url: ${CNTSEC_URL:jdbc:sqlserver://${cntsec.datasource.host}:1433;databaseName=CNTSEC;encrypt=true;trustServerCertificate=true}
-    username: ${CNTSEC_USER:}
-    password: ${CNTSEC_PASSWORD:}
+    username: ${CNTSEC_USER:Usr_API}
+    password: ${CNTSEC_PASSWORD:concob2$2015}
     # Script opcional para una CNTSEC simulada en H2 (pruebas y desarrollo sin red): classpath:cntsec-h2.sql
     init-script: ${CNTSEC_INIT_SCRIPT:}
     max-pool-size: ${CNTSEC_POOL:5}
