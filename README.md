@@ -84,6 +84,27 @@ Reglas que viven en código, no en el prompt del agente: sin identidad validada 
 
 Flujo del validador en una llamada: el discador consulta `GET /clientes/{documento}` y solo origina la llamada si `llamable` es `true` → `POST /llamadas` al iniciar la sesión → el agente saluda con `nombre`, pregunta "¿hablo con…?" y pide los primeros 4 dígitos del documento → `POST /clientes/verificar` → cada herramienta se registra en `POST /llamadas/{callId}/eventos` → `POST /telefonos/validacion` con el resultado (`CONTACTO_VALIDADO`, `SIN_VALIDAR`, `TERCERO`, `NUMERO_EQUIVOCADO`, `NO_EXISTE`) → `POST /llamadas/{callId}/resultado` al cerrar. `GET /llamadas/{callId}` permite auditar la gestión completa. El validador no recibe deudas, días de mora ni teléfonos: el número marcado viene de la lista cargada en el discador.
 
+## Configuración del agente (depósito versionado)
+
+Los prompts, el guion y los `config.yaml` de cada perfil de agent-voice, más `global.yaml`, ya no viven en archivos del servidor del agente: se guardan en la **BD propia** de esta API, por **ámbito** (`global` o el nombre de un perfil: `validador`, `seguimiento`, `negociador` o los que se creen). Cada ámbito tiene versiones numeradas 1..n, inmutables (la publicada es la de mayor número) y a lo sumo un borrador. Una versión o borrador es un mapa `nombreArchivo -> contenido` con nombres permitidos `prompt.md`, `guion.json`, `config.yaml` y `global.yaml`, texto UTF-8 de hasta 256 KB por archivo. El ámbito cumple `^[a-z][a-z0-9_-]{0,31}$`. La consola de agent-voice escribe; agent-voice lee. Paquete `pe.cobranza.api.configuracionagente`.
+
+| Método | Endpoint | Uso |
+|---|---|---|
+| GET | `/api/v1/configuracion-agente` | Ámbitos conocidos con `versionVigente` (`null` si nunca se publicó), `hayBorrador` y `publicadoEn` |
+| GET | `/api/v1/configuracion-agente/{ambito}` | Versión publicada con sus archivos. `404` si el ámbito no tiene ninguna versión |
+| POST | `/api/v1/configuracion-agente/{ambito}/publicar` | Crea la versión `n+1` con `archivos`, `autor` y `comentario`, y elimina el borrador del ámbito. `201`; `400` si `archivos` está vacío, un nombre no está permitido o un contenido supera 256 KB |
+| GET | `/api/v1/configuracion-agente/{ambito}/borrador` | Borrador del ámbito. `404` si no hay |
+| PUT | `/api/v1/configuracion-agente/{ambito}/borrador` | Crea o reemplaza por completo el borrador (`archivos`, `autor`, `comentario`) |
+| DELETE | `/api/v1/configuracion-agente/{ambito}/borrador` | Elimina el borrador. `204`, idempotente |
+| GET | `/api/v1/configuracion-agente/{ambito}/versiones` | Historial (`numero`, `autor`, `comentario`, `fecha`) de mayor a menor, sin archivos |
+| GET | `/api/v1/configuracion-agente/{ambito}/versiones/{numero}` | Una versión concreta con sus archivos. `404` si no existe |
+
+"Restaurar" una versión lo hace el cliente: lee `versiones/{numero}` y guarda el resultado como borrador con `PUT`.
+
+Tablas (BD propia): `config_agente_version` (único `(ambito, numero)`) y `config_agente_version_archivo` (PK `(version_id, nombre)`); `config_agente_borrador` (PK `ambito`) y `config_agente_borrador_archivo` (PK `(ambito, nombre)`).
+
+> **Persistencia.** Con el perfil por defecto (H2 en memoria) la configuración **se pierde al reiniciar la API**; agent-voice la vuelve a sembrar desde sus archivos cuando el ámbito no existe (`GET /{ambito}` responde `404`). En producción usa el perfil `sqlserver` y crea las tablas con [`specs/sql/config_agente.sql`](specs/sql/config_agente.sql).
+
 ## Política de descuentos
 
 Se define en `src/main/resources/application.yml`, bajo `cobranza.politica`:
@@ -121,7 +142,7 @@ Para alojar la BD propia en SQL Server activa el perfil `sqlserver`:
 java -jar target/business-api-0.1.0.jar --spring.profiles.active=sqlserver
 ```
 
-El perfil lee las variables de entorno `DB_URL`, `DB_USER` y `DB_PASSWORD`. Defínelas antes de arrancar; no hay credenciales en el repositorio. Con este perfil Hibernate no toca el esquema (`ddl-auto: none`) ni carga datos sintéticos; el esquema lo crea un script de BD e incluye las tablas `llamada`, `evento_llamada`, `validacion_telefono`, `rellamada` (con `estado`) y `resultado_llamada` (con `guion_hash`, `transcripcion` y `resumen_estructurado`). `DB_URL` no debe apuntar a CNTSEC.
+El perfil lee las variables de entorno `DB_URL`, `DB_USER` y `DB_PASSWORD`. Defínelas antes de arrancar; no hay credenciales en el repositorio. Con este perfil Hibernate no toca el esquema (`ddl-auto: none`) ni carga datos sintéticos; el esquema lo crea un script de BD e incluye las tablas `llamada`, `evento_llamada`, `validacion_telefono`, `rellamada` (con `estado`) y `resultado_llamada` (con `guion_hash`, `transcripcion` y `resumen_estructurado`), más las cuatro tablas del depósito de configuración del agente, que crea [`specs/sql/config_agente.sql`](specs/sql/config_agente.sql). `DB_URL` no debe apuntar a CNTSEC.
 
 ## Datos sintéticos
 
@@ -133,7 +154,7 @@ Con el perfil por defecto se cargan desde `src/main/resources/data.sql`. Son dat
 | 70123456 | María Quispe Huamán | 1992 | 1 (S/ 2,100, 450 días de mora) |
 | 10293847 | Jorge Salazar Prado | 1978 | 2 (S/ 15,200, 1,250 días; S/ 6,400, 700 días) |
 
-Los datos están en memoria H2: al reiniciar la API, las llamadas, promesas, rellamadas y resultados registrados se borran y puedes repetir la prueba.
+Los datos están en memoria H2: al reiniciar la API, las llamadas, promesas, rellamadas, resultados y la configuración del agente registrados se borran y puedes repetir la prueba.
 
 ## Pruebas
 
