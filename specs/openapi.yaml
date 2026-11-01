@@ -42,6 +42,8 @@ tags:
     description: "Ciclo de vida de una llamada con agente IA: inicio, eventos, resultado y consulta."
   - name: Teléfonos
     description: Resultado de la validación del teléfono marcado.
+  - name: Configuración del agente
+    description: Depósito versionado de prompts, guion y configuración por ámbito (global o perfil), consumido por agent-voice y su consola.
 
 paths:
   /api/v1/clientes/{documento}:
@@ -550,6 +552,246 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/configuracion-agente:
+    get:
+      tags: [Configuración del agente]
+      operationId: listarAmbitosConfiguracion
+      summary: Ámbitos con configuración publicada o en borrador
+      description: |
+        Un ámbito es `global` o el nombre de un perfil del agente (`validador`, `seguimiento`, `negociador` o los que
+        se creen). Devuelve, por ámbito, la versión vigente (la de mayor número, `null` si aún no se publicó),
+        si hay borrador y la fecha de publicación. Vacío si no hay nada configurado.
+      responses:
+        '200':
+          description: Ámbitos conocidos, ordenados alfabéticamente.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AmbitoConfiguracion'
+              example:
+                - { ambito: global, versionVigente: 3, hayBorrador: false, publicadoEn: '2026-10-30T18:02:11' }
+                - { ambito: negociador, versionVigente: null, hayBorrador: true, publicadoEn: null }
+                - { ambito: validador, versionVigente: 7, hayBorrador: true, publicadoEn: '2026-10-31T09:40:00' }
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+
+  /api/v1/configuracion-agente/{ambito}:
+    get:
+      tags: [Configuración del agente]
+      operationId: obtenerConfiguracionPublicada
+      summary: Configuración publicada de un ámbito
+      description: |
+        La versión vigente del ámbito, con todos sus archivos. Es lo que agent-voice carga al arrancar o al
+        recargar un perfil. Si el ámbito no tiene ninguna versión responde 404 y agent-voice lo siembra
+        desde sus archivos con `publicar`.
+      parameters:
+        - $ref: '#/components/parameters/Ambito'
+      responses:
+        '200':
+          description: Versión vigente con sus archivos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionConfiguracion'
+              example:
+                ambito: validador
+                numero: 7
+                autor: dpineda
+                comentario: Ajuste del saludo y segundo intento de dígitos.
+                fecha: '2026-10-31T09:40:00'
+                archivos:
+                  prompt.md: "Eres Lucía, asesora de Finanty...\n"
+                  guion.json: "{\"saludo\":\"Buenos días, ¿hablo con {nombre}?\"}"
+                  config.yaml: "llm:\n  modelo: gpt-4.1-mini\n"
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '404':
+          description: El ámbito no tiene ninguna versión publicada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: El ámbito no tiene configuración publicada }
+
+  /api/v1/configuracion-agente/{ambito}/publicar:
+    post:
+      tags: [Configuración del agente]
+      operationId: publicarConfiguracion
+      summary: Publica una versión nueva del ámbito
+      description: |
+        Crea la versión `n+1` (inmutable) con los archivos enviados y elimina el borrador del ámbito si existía.
+        Los archivos reemplazan por completo a los de la versión anterior: lo que no venga, no estará en la nueva.
+        Nombres permitidos: `prompt.md`, `guion.json`, `config.yaml`, `global.yaml`. Contenido texto UTF-8 de hasta 256 KB por archivo.
+      parameters:
+        - $ref: '#/components/parameters/Ambito'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicarConfiguracionRequest'
+            example:
+              archivos:
+                prompt.md: "Eres Lucía, asesora de Finanty...\n"
+                guion.json: "{\"saludo\":\"Buenos días, ¿hablo con {nombre}?\"}"
+                config.yaml: "llm:\n  modelo: gpt-4.1-mini\n"
+              autor: dpineda
+              comentario: Ajuste del saludo y segundo intento de dígitos.
+      responses:
+        '201':
+          description: Versión creada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfiguracionPublicadaResponse'
+              example: { ambito: validador, numero: 8, fecha: '2026-10-31T10:05:42' }
+        '400':
+          description: Ámbito inválido, `archivos` vacío, nombre de archivo no permitido o contenido demasiado grande.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: 'Nombre de archivo no permitido: notas.txt. Permitidos: prompt.md, guion.json, config.yaml, global.yaml' }
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+
+  /api/v1/configuracion-agente/{ambito}/borrador:
+    get:
+      tags: [Configuración del agente]
+      operationId: obtenerBorradorConfiguracion
+      summary: Borrador del ámbito
+      description: A lo sumo hay un borrador por ámbito. Es el trabajo en curso de la consola, aún no publicado.
+      parameters:
+        - $ref: '#/components/parameters/Ambito'
+      responses:
+        '200':
+          description: Borrador con sus archivos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BorradorConfiguracion'
+              example:
+                ambito: validador
+                autor: dpineda
+                comentario: Probando un saludo más corto.
+                fecha: '2026-10-31T10:20:00'
+                archivos:
+                  prompt.md: "Eres Lucía...\n"
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '404':
+          description: El ámbito no tiene borrador.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: El ámbito no tiene borrador }
+    put:
+      tags: [Configuración del agente]
+      operationId: guardarBorradorConfiguracion
+      summary: Crea o reemplaza el borrador del ámbito
+      description: |
+        Guarda el borrador completo (los archivos enviados reemplazan a los anteriores). Para "restaurar" una
+        versión antigua el cliente la lee con `versiones/{numero}` y la guarda aquí como borrador.
+        Mismas reglas de nombres y tamaño que `publicar`.
+      parameters:
+        - $ref: '#/components/parameters/Ambito'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuardarBorradorRequest'
+            example:
+              archivos:
+                prompt.md: "Eres Lucía...\n"
+              autor: dpineda
+              comentario: Probando un saludo más corto.
+      responses:
+        '200':
+          description: Borrador guardado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BorradorGuardadoResponse'
+              example: { ambito: validador, fecha: '2026-10-31T10:20:00' }
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+    delete:
+      tags: [Configuración del agente]
+      operationId: eliminarBorradorConfiguracion
+      summary: Elimina el borrador del ámbito
+      description: Idempotente; responde 204 aunque no hubiera borrador.
+      parameters:
+        - $ref: '#/components/parameters/Ambito'
+      responses:
+        '204':
+          description: Borrador eliminado o inexistente.
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+
+  /api/v1/configuracion-agente/{ambito}/versiones:
+    get:
+      tags: [Configuración del agente]
+      operationId: listarVersionesConfiguracion
+      summary: Historial de versiones del ámbito
+      description: Metadatos de cada versión publicada, sin archivos, de la más reciente a la más antigua. Vacío si no hay ninguna.
+      parameters:
+        - $ref: '#/components/parameters/Ambito'
+      responses:
+        '200':
+          description: Versiones ordenadas por `numero` descendente.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VersionConfiguracionResumen'
+              example:
+                - { numero: 8, autor: dpineda, comentario: Ajuste del saludo., fecha: '2026-10-31T10:05:42' }
+                - { numero: 7, autor: dpineda, comentario: Segundo intento de dígitos., fecha: '2026-10-31T09:40:00' }
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+
+  /api/v1/configuracion-agente/{ambito}/versiones/{numero}:
+    get:
+      tags: [Configuración del agente]
+      operationId: obtenerVersionConfiguracion
+      summary: Una versión concreta con sus archivos
+      parameters:
+        - $ref: '#/components/parameters/Ambito'
+        - $ref: '#/components/parameters/NumeroVersion'
+      responses:
+        '200':
+          description: Versión con sus archivos.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionConfiguracion'
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '404':
+          description: No existe esa versión en el ámbito.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: Versión no encontrada }
+
 components:
   securitySchemes:
     ApiKey:
@@ -577,6 +819,24 @@ components:
         maxLength: 64
       example: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
       description: Identificador de la llamada (`uuid_llamada` del discador).
+    Ambito:
+      name: ambito
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z][a-z0-9_-]{0,31}$'
+      example: validador
+      description: "`global` o el nombre de un perfil del agente. Minúsculas, dígitos, guion y guion bajo; hasta 32 caracteres."
+    NumeroVersion:
+      name: numero
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+      example: 7
+      description: Número de versión dentro del ámbito (1..n).
 
   responses:
     NoAutorizado:
@@ -912,3 +1172,88 @@ components:
         mensaje: { type: string }
         esCliente: { type: boolean, description: true solo con CONTACTO_VALIDADO. }
         duracionSegundos: { type: [integer, 'null'] }
+
+    ArchivosConfiguracion:
+      type: object
+      description: |
+        Mapa `nombreArchivo -> contenido` (texto UTF-8). Nombres permitidos: `prompt.md`, `guion.json`,
+        `config.yaml`, `global.yaml`. Máximo 256 KB por archivo.
+      minProperties: 1
+      propertyNames:
+        enum: [prompt.md, guion.json, config.yaml, global.yaml]
+      additionalProperties:
+        type: string
+        maxLength: 262144
+      example:
+        prompt.md: "Eres Lucía, asesora de Finanty...\n"
+        config.yaml: "llm:\n  modelo: gpt-4.1-mini\n"
+
+    AmbitoConfiguracion:
+      type: object
+      required: [ambito, versionVigente, hayBorrador, publicadoEn]
+      properties:
+        ambito: { type: string }
+        versionVigente: { type: [integer, 'null'], description: Número de la versión publicada (la mayor); null si nunca se publicó. }
+        hayBorrador: { type: boolean }
+        publicadoEn: { type: [string, 'null'], format: date-time, description: Fecha de la versión vigente. }
+
+    VersionConfiguracionResumen:
+      type: object
+      required: [numero, autor, comentario, fecha]
+      properties:
+        numero: { type: integer, minimum: 1 }
+        autor: { type: string }
+        comentario: { type: [string, 'null'] }
+        fecha: { type: string, format: date-time }
+
+    VersionConfiguracion:
+      type: object
+      required: [ambito, numero, autor, comentario, fecha, archivos]
+      properties:
+        ambito: { type: string }
+        numero: { type: integer, minimum: 1 }
+        autor: { type: string }
+        comentario: { type: [string, 'null'] }
+        fecha: { type: string, format: date-time }
+        archivos: { $ref: '#/components/schemas/ArchivosConfiguracion' }
+
+    PublicarConfiguracionRequest:
+      type: object
+      required: [archivos, autor]
+      properties:
+        archivos: { $ref: '#/components/schemas/ArchivosConfiguracion' }
+        autor: { type: string, maxLength: 100, description: Quién publica (usuario de la consola). }
+        comentario: { type: string, maxLength: 500, description: Qué cambió en esta versión. }
+
+    ConfiguracionPublicadaResponse:
+      type: object
+      required: [ambito, numero, fecha]
+      properties:
+        ambito: { type: string }
+        numero: { type: integer, minimum: 1, description: Número asignado a la versión nueva. }
+        fecha: { type: string, format: date-time }
+
+    BorradorConfiguracion:
+      type: object
+      required: [ambito, autor, comentario, fecha, archivos]
+      properties:
+        ambito: { type: string }
+        autor: { type: string }
+        comentario: { type: [string, 'null'] }
+        fecha: { type: string, format: date-time, description: Último guardado. }
+        archivos: { $ref: '#/components/schemas/ArchivosConfiguracion' }
+
+    GuardarBorradorRequest:
+      type: object
+      required: [archivos, autor]
+      properties:
+        archivos: { $ref: '#/components/schemas/ArchivosConfiguracion' }
+        autor: { type: string, maxLength: 100 }
+        comentario: { type: string, maxLength: 500 }
+
+    BorradorGuardadoResponse:
+      type: object
+      required: [ambito, fecha]
+      properties:
+        ambito: { type: string }
+        fecha: { type: string, format: date-time }
