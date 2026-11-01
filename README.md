@@ -4,7 +4,7 @@ Este repositorio es la pieza **business-api** del producto Agente Conversacional
 
 ## Stack
 
-Java 21 + Spring Boot 4 (Web MVC, Data JPA, Validation). Base de datos H2 en memoria para desarrollo; perfil opcional para SQL Server.
+Java 21 + Spring Boot 4 (Web MVC, Data JPA, Validation). BD propia en **SQL Server** (perfil `sqlserver`) en desarrollo y producción; **H2** en memoria solo para las pruebas (`./mvnw test`).
 
 ## Contrato
 
@@ -15,14 +15,41 @@ El contrato OpenAPI 3.1 está en [`specs/openapi.yaml`](specs/openapi.yaml) y se
 Requiere JDK 21 o superior. Maven viene incluido con el wrapper (`mvnw` / `mvnw.cmd`), así que no hace falta tenerlo en el PATH.
 
 ```bash
-./mvnw spring-boot:run
-# o: ./mvnw package && java -jar target/business-api-0.1.0.jar
-# pruebas: ./mvnw test
+./mvnw spring-boot:run -Dspring-boot.run.profiles=sqlserver      # desarrollo: BD de desarrollo (ver sección siguiente)
+# o: ./mvnw package && java -jar target/business-api-0.1.0.jar --spring.profiles.active=sqlserver
+# pruebas (siempre H2): ./mvnw test
 ```
 
 Si `JAVA_HOME` apunta a otra versión, exporta `JAVA_HOME` hacia un JDK 21 antes de ejecutar el wrapper.
 
-Queda en `http://localhost:8080` con datos sintéticos en memoria (H2).
+Queda en `http://localhost:8085` (`SERVER_PORT`). Sin perfil activo la API arranca con H2 en memoria y datos sintéticos; ese modo es solo un respaldo para trabajar sin red, no el camino de desarrollo.
+
+## Desarrollo contra la BD de desarrollo
+
+En desarrollo la API usa la **BD propia de desarrollo en SQL Server**, nunca H2 y nunca CNTSEC. El perfil `sqlserver` (`application-sqlserver.yml`) lee la conexión de variables de entorno y deja el esquema en manos de los scripts (`ddl-auto: none`, sin datos sintéticos). `GuardaEsquema` sigue abortando el arranque si alguien configura `create-drop` o `SQL_INIT_MODE=always` fuera de H2.
+
+1. Crear el esquema una sola vez en la BD de desarrollo, en este orden:
+   1. [`specs/sql/esquema_propio.sql`](specs/sql/esquema_propio.sql): las siete tablas propias (`cliente`, `deuda`, `promesa_pago`, `llamada`, `evento_llamada`, `resultado_llamada`, `rellamada`) con PK, FK e índices. Idempotente.
+   2. (Obsoleto, opcional) `specs/sql/config_agente.sql`: solo si aún se usan los endpoints `/api/v1/configuracion-agente`; ese dominio se retirará porque agent-voice tendrá su propio PostgreSQL.
+2. Definir las variables en el entorno (sin valores en el repositorio):
+
+   ```bash
+   export DB_URL='jdbc:sqlserver://<servidor>:1433;databaseName=<bd_propia_dev>;encrypt=true;trustServerCertificate=true'
+   export DB_USER='<usuario>'
+   export DB_PASSWORD='<contraseña>'
+   export CNTSEC_USER='<usuario_cntsec>'
+   export CNTSEC_PASSWORD='<contraseña_cntsec>'   # CNTSEC_HOST ya apunta al servidor de desarrollo
+   export COBRANZA_API_KEY='<clave_compartida_con_el_agente>'
+   ```
+
+3. Arrancar con el perfil:
+
+   ```bash
+   ./mvnw spring-boot:run -Dspring-boot.run.profiles=sqlserver
+   # o con el jar: java -jar target/business-api-0.1.0.jar --spring.profiles.active=sqlserver
+   ```
+
+El script se comprueba en cada `./mvnw test`: `EsquemaPropioSqlServerTest` lo ejecuta en H2 en modo `MSSQLServer` y hace que Hibernate, con el dialecto de SQL Server, valide el esquema contra las entidades (`ddl-auto: validate`) y compare columna a columna. Con `docker compose` del workspace, el servicio `business-api` recibe estas mismas variables y `SPRING_PROFILES_ACTIVE=sqlserver`.
 
 ## Autenticación
 
@@ -42,10 +69,10 @@ Toda clave, URL o parámetro se lee de variables de entorno con placeholders en 
 |---|---|---|---|
 | `COBRANZA_API_KEY` | `cobranza.api-key` | `dev-key-cambiar` | Clave compartida con el agente (`X-API-Key`) |
 | `SERVER_PORT` | `server.port` | `8085` | Puerto HTTP |
-| `DB_URL` | `spring.datasource.url` | H2 en memoria | BD **propia** de la API (llamadas, eventos, resultados, validaciones, promesas, rellamadas). Nunca CNTSEC |
+| `DB_URL` | `spring.datasource.url` | H2 en memoria (solo respaldo sin perfil) | BD **propia** de la API en SQL Server con el perfil `sqlserver` (clientes, deudas, promesas, llamadas, eventos, resultados, rellamadas). Nunca CNTSEC. Las pruebas la ignoran: usan siempre H2 (perfil `test`) |
 | `DB_USER` | `spring.datasource.username` | `sa` | Usuario de la BD propia (obligatorio con `sqlserver`) |
 | `DB_PASSWORD` | `spring.datasource.password` | vacío | Contraseña de la BD propia (obligatoria con `sqlserver`) |
-| `JPA_DDL_AUTO` / `SQL_INIT_MODE` | `spring.jpa.hibernate.ddl-auto` / `spring.sql.init.mode` | `create-drop` / `always` | Solo válidos con H2; `GuardaEsquema` aborta el arranque si se usan contra otra BD |
+| `JPA_DDL_AUTO` / `SQL_INIT_MODE` | `spring.jpa.hibernate.ddl-auto` / `spring.sql.init.mode` | `create-drop` / `always` (sin perfil); `none` / `never` con `sqlserver` | Solo válidos con H2; `GuardaEsquema` aborta el arranque si se usan contra otra BD. El esquema de SQL Server lo crea `specs/sql/esquema_propio.sql` |
 | `CNTSEC_HOST` | `cntsec.datasource.host` | `FNTSRVD4` (desarrollo) | Servidor SQL Server de CNTSEC. El perfil `prod` (`application-prod.yml`) cambia solo este valor |
 | `CNTSEC_URL` | `cntsec.datasource.url` | `jdbc:sqlserver://${CNTSEC_HOST}:1433;databaseName=CNTSEC;...` | URL completa; solo hace falta para una BD distinta, por ejemplo sin red: `jdbc:h2:mem:cntsec;MODE=MSSQLServer;DB_CLOSE_DELAY=-1` |
 | `CNTSEC_USER` / `CNTSEC_PASSWORD` | `cntsec.datasource.username` / `password` | vacío | Credenciales de CNTSEC; nunca en el repositorio |
@@ -84,7 +111,9 @@ Reglas que viven en código, no en el prompt del agente: sin identidad validada 
 
 Flujo del validador en una llamada: el discador consulta `GET /clientes/{documento}` y solo origina la llamada si `llamable` es `true` → `POST /llamadas` al iniciar la sesión → el agente saluda con `nombre`, pregunta "¿hablo con…?" y pide los primeros 4 dígitos del documento → `POST /clientes/verificar` → cada herramienta se registra en `POST /llamadas/{callId}/eventos` → `POST /telefonos/validacion` con el resultado (`CONTACTO_VALIDADO`, `SIN_VALIDAR`, `TERCERO`, `NUMERO_EQUIVOCADO`, `NO_EXISTE`) → `POST /llamadas/{callId}/resultado` al cerrar. `GET /llamadas/{callId}` permite auditar la gestión completa. El validador no recibe deudas, días de mora ni teléfonos: el número marcado viene de la lista cargada en el discador.
 
-## Configuración del agente (depósito versionado)
+## Configuración del agente (depósito versionado) — OBSOLETO
+
+> **Se retirará.** agent-voice tendrá su propio PostgreSQL para prompts, guion y configuración, así que este dominio (`pe.cobranza.api.configuracionagente`), sus endpoints y `specs/sql/config_agente.sql` quedan obsoletos. No forman parte del camino de desarrollo ni del esquema `esquema_propio.sql`; se conservan hasta que agent-voice migre.
 
 Los prompts, el guion y los `config.yaml` de cada perfil de agent-voice, más `global.yaml`, ya no viven en archivos del servidor del agente: se guardan en la **BD propia** de esta API, por **ámbito** (`global` o el nombre de un perfil: `validador`, `seguimiento`, `negociador` o los que se creen). Cada ámbito tiene versiones numeradas 1..n, inmutables (la publicada es la de mayor número) y a lo sumo un borrador. Una versión o borrador es un mapa `nombreArchivo -> contenido` con nombres permitidos `prompt.md`, `guion.json`, `config.yaml` y `global.yaml`, texto UTF-8 de hasta 256 KB por archivo. El ámbito cumple `^[a-z][a-z0-9_-]{0,31}$`. La consola de agent-voice escribe; agent-voice lee. Paquete `pe.cobranza.api.configuracionagente`.
 
@@ -103,7 +132,7 @@ Los prompts, el guion y los `config.yaml` de cada perfil de agent-voice, más `g
 
 Tablas (BD propia): `config_agente_version` (único `(ambito, numero)`) y `config_agente_version_archivo` (PK `(version_id, nombre)`); `config_agente_borrador` (PK `ambito`) y `config_agente_borrador_archivo` (PK `(ambito, nombre)`).
 
-> **Persistencia.** Con el perfil por defecto (H2 en memoria) la configuración **se pierde al reiniciar la API**; agent-voice la vuelve a sembrar desde sus archivos cuando el ámbito no existe (`GET /{ambito}` responde `404`). En producción usa el perfil `sqlserver` y crea las tablas con [`specs/sql/config_agente.sql`](specs/sql/config_agente.sql).
+> **Persistencia.** Sin perfil (H2 en memoria) la configuración **se pierde al reiniciar la API**; agent-voice la vuelve a sembrar desde sus archivos cuando el ámbito no existe (`GET /{ambito}` responde `404`). Con el perfil `sqlserver` las tablas solo existen si se ejecutó [`specs/sql/config_agente.sql`](specs/sql/config_agente.sql) (opcional y obsoleto).
 
 ## Política de descuentos
 
@@ -118,7 +147,7 @@ Se define en `src/main/resources/application.yml`, bajo `cobranza.politica`:
 
 La API tiene dos fuentes de datos:
 
-- **BD propia** (`DB_URL`): llamadas, eventos, resultados, validaciones de teléfono, promesas y rellamadas. H2 en desarrollo; en producción una BD propia en SQL Server (perfil `sqlserver`).
+- **BD propia** (`DB_URL`): clientes y deudas de negociación, promesas, llamadas, eventos, resultados y rellamadas. SQL Server con el perfil `sqlserver` tanto en desarrollo (BD de desarrollo) como en producción; H2 solo en las pruebas. Las validaciones de teléfono no van aquí sino en `AGENTEIATT01` de CNTSEC.
 - **CNTSEC** (`CNTSEC_HOST`): la BD de CobraTwo. Por defecto el servidor de desarrollo `FNTSRVD4`; en producción se activa el perfil `prod` (`application-prod.yml`), que solo cambia el servidor (`--spring.profiles.active=prod`, o `prod,sqlserver` si la BD propia también va en SQL Server). Se consulta con SQL nativo (`pe.cobranza.api.cntsec`), con un pool de **solo lectura** salvo que se habilite el registro de gestión. Nunca se crean tablas ahí.
 
 Tablas de CNTSEC que usa el validador (nomenclatura CobraTwo, sinónimo legible entre paréntesis):
@@ -136,17 +165,25 @@ Para desarrollo o pruebas sin acceso a la red: `CNTSEC_URL=jdbc:h2:mem:cntsec;MO
 
 ## SQL Server (BD propia)
 
-Para alojar la BD propia en SQL Server activa el perfil `sqlserver`:
+Un único camino: **desarrollo y producción = SQL Server con el perfil `sqlserver`; pruebas = H2**. El perfil lee `DB_URL`, `DB_USER` y `DB_PASSWORD` del entorno (no hay credenciales en el repositorio), Hibernate no toca el esquema (`ddl-auto: none`) y no se cargan datos sintéticos. `DB_URL` no debe apuntar a CNTSEC.
 
-```bash
-java -jar target/business-api-0.1.0.jar --spring.profiles.active=sqlserver
-```
+El esquema lo crea [`specs/sql/esquema_propio.sql`](specs/sql/esquema_propio.sql), idempotente y con tipos coherentes con las entidades JPA (`nvarchar`, `datetime2`, `nvarchar(max)` para transcripción, resumen estructurado y JSON de eventos, `numeric(12,2)` para montos):
 
-El perfil lee las variables de entorno `DB_URL`, `DB_USER` y `DB_PASSWORD`. Defínelas antes de arrancar; no hay credenciales en el repositorio. Con este perfil Hibernate no toca el esquema (`ddl-auto: none`) ni carga datos sintéticos; el esquema lo crea un script de BD e incluye las tablas `llamada`, `evento_llamada`, `validacion_telefono`, `rellamada` (con `estado`) y `resultado_llamada` (con `guion_hash`, `transcripcion` y `resumen_estructurado`), más las cuatro tablas del depósito de configuración del agente, que crea [`specs/sql/config_agente.sql`](specs/sql/config_agente.sql). `DB_URL` no debe apuntar a CNTSEC.
+| Tabla | Entidad | Índices además de la PK |
+|---|---|---|
+| `cliente` | `Cliente` | único `documento` |
+| `deuda` | `Deuda` | `cliente_id` (FK a `cliente`) |
+| `promesa_pago` | `PromesaPago` | `deuda_id` (FK a `deuda`), `call_id` |
+| `llamada` | `Llamada` | único `call_id`; `documento, inicio` |
+| `evento_llamada` | `EventoLlamada` | `call_id` |
+| `resultado_llamada` | `ResultadoLlamada` | `call_id`; `documento, creado_en` |
+| `rellamada` | `Rellamada` | `estado, fecha_hora`; `documento`; `call_id` |
+
+`EsquemaPropioSqlServerTest` garantiza que el script y las entidades no se desalineen: lo ejecuta en H2 (`MODE=MSSQLServer`), valida con Hibernate y el dialecto de SQL Server (`ddl-auto: validate`) y comprueba que no falte ni sobre ninguna columna. Al añadir o cambiar una entidad hay que actualizar el script (y aplicarlo a la BD de desarrollo) o la prueba falla. Para producción se ejecuta el mismo script en la BD propia de producción y se combinan perfiles: `--spring.profiles.active=prod,sqlserver`.
 
 ## Datos sintéticos
 
-Con el perfil por defecto se cargan desde `src/main/resources/data.sql`. Son datos ficticios: nunca uses datos reales de deudores en desarrollo (Ley 29733).
+Solo con H2 (pruebas y arranque sin perfil) se cargan desde `src/main/resources/data.sql`; en la BD de desarrollo las tablas `cliente` y `deuda` nacen vacías. Son datos ficticios: nunca uses datos reales de deudores en desarrollo (Ley 29733).
 
 | Documento | Nombre | Año de nacimiento | Deudas |
 |---|---|---|---|
@@ -154,7 +191,7 @@ Con el perfil por defecto se cargan desde `src/main/resources/data.sql`. Son dat
 | 70123456 | María Quispe Huamán | 1992 | 1 (S/ 2,100, 450 días de mora) |
 | 10293847 | Jorge Salazar Prado | 1978 | 2 (S/ 15,200, 1,250 días; S/ 6,400, 700 días) |
 
-Los datos están en memoria H2: al reiniciar la API, las llamadas, promesas, rellamadas, resultados y la configuración del agente registrados se borran y puedes repetir la prueba.
+En H2 los datos están en memoria: al reiniciar la API se borra todo lo registrado y puedes repetir la prueba. Con el perfil `sqlserver` lo registrado persiste en la BD de desarrollo.
 
 ## Pruebas
 
@@ -162,7 +199,7 @@ Los datos están en memoria H2: al reiniciar la API, las llamadas, promesas, rel
 ./mvnw test
 ```
 
-Pruebas con MockMvc sobre el contexto completo (H2 con datos sintéticos): endpoints nuevos, compatibilidad del cuerpo original del resultado, regresión de los endpoints de la fase 1 y verificación del contrato OpenAPI contra las rutas y catálogos del código.
+Las pruebas corren **siempre en H2**: la clase base `PruebaApi` activa el perfil `test` (`src/test/resources/application-test.yml`), que fija la BD propia y la CNTSEC simulada en memoria con valores sin placeholders, así que `./mvnw test` nunca toca una BD real aunque el entorno tenga `DB_URL` o `SPRING_PROFILES_ACTIVE=sqlserver`. Cubren con MockMvc sobre el contexto completo (datos sintéticos) los endpoints, la compatibilidad del cuerpo original del resultado, la regresión de la fase 1, el contrato OpenAPI contra las rutas y catálogos del código, y `EsquemaPropioSqlServerTest` valida `specs/sql/esquema_propio.sql` contra las entidades.
 
 ## Próximos endpoints
 

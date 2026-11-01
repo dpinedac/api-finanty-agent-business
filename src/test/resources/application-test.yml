@@ -1,0 +1,26 @@
+# Perfil `test`: lo activa PruebaApi con @ActiveProfiles. Las pruebas SIEMPRE corren contra H2 en memoria,
+# aunque el entorno tenga DB_URL, DB_USER, DB_PASSWORD o SPRING_PROFILES_ACTIVE=sqlserver definidos:
+# los valores van fijos aquí (sin placeholders de entorno) y @ActiveProfiles sustituye a los perfiles del entorno.
+# `./mvnw test` nunca toca una BD real.
+spring:
+  datasource:
+    url: jdbc:h2:mem:cobranza-test;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    defer-datasource-initialization: true
+  sql:
+    init:
+      # Datos sintéticos de src/main/resources/data.sql (solo H2)
+      mode: always
+
+# CNTSEC simulada en H2 con datos sintéticos (cntsec-h2.sql); el registro de gestión se prueba contra esa copia.
+cntsec:
+  datasource:
+    host: h2
+    url: jdbc:h2:mem:cntsec-test;MODE=MSSQLServer;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+    init-script: classpath:cntsec-h2.sql
