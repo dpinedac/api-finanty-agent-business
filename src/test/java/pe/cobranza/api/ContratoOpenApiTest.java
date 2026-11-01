@@ -66,7 +66,15 @@ class ContratoOpenApiTest extends PruebaApi {
                 "POST /api/v1/llamadas/{callId}/eventos",
                 "POST /api/v1/llamadas/{callId}/resultado",
                 "POST /api/v1/telefonos/validacion",
-                "GET /api/v1/rellamadas");
+                "GET /api/v1/rellamadas",
+                "GET /api/v1/configuracion-agente",
+                "GET /api/v1/configuracion-agente/{ambito}",
+                "POST /api/v1/configuracion-agente/{ambito}/publicar",
+                "GET /api/v1/configuracion-agente/{ambito}/borrador",
+                "PUT /api/v1/configuracion-agente/{ambito}/borrador",
+                "DELETE /api/v1/configuracion-agente/{ambito}/borrador",
+                "GET /api/v1/configuracion-agente/{ambito}/versiones",
+                "GET /api/v1/configuracion-agente/{ambito}/versiones/{numero}");
     }
 
     @Test

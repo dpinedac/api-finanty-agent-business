@@ -10,8 +10,10 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 import java.util.UUID;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 
 /**
  * Base de las pruebas de endpoints: contexto completo con H2 en memoria y datos sintéticos,
@@ -46,5 +48,16 @@ public abstract class PruebaApi {
 
     protected static MockHttpServletRequestBuilder getJson(String ruta) {
         return get(ruta).header("X-API-Key", API_KEY);
+    }
+
+    protected static MockHttpServletRequestBuilder putJson(String ruta, String cuerpo) {
+        return put(ruta)
+                .header("X-API-Key", API_KEY)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(cuerpo);
+    }
+
+    protected static MockHttpServletRequestBuilder deleteJson(String ruta) {
+        return delete(ruta).header("X-API-Key", API_KEY);
     }
 }
