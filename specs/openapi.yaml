@@ -658,6 +658,15 @@ paths:
               example: { error: 'Nombre de archivo no permitido: notas.txt. Permitidos: prompt.md, guion.json, config.yaml, global.yaml' }
         '401':
           $ref: '#/components/responses/NoAutorizado'
+        '409':
+          description: |
+            Publicación concurrente: otra publicación del mismo ámbito tomó el número `n+1` al mismo tiempo
+            (lo detecta la restricción única `(ambito, numero)`). No se creó nada; reintentar.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example: { error: 'Otra publicación del ámbito ocurrió al mismo tiempo; reintenta' }
 
   /api/v1/configuracion-agente/{ambito}/borrador:
     get:
@@ -1203,7 +1212,7 @@ components:
       properties:
         numero: { type: integer, minimum: 1 }
         autor: { type: string }
-        comentario: { type: [string, 'null'] }
+        comentario: { type: [string, 'null'], description: null cuando no se envió al publicar o guardar. }
         fecha: { type: string, format: date-time }
 
     VersionConfiguracion:
@@ -1213,7 +1222,7 @@ components:
         ambito: { type: string }
         numero: { type: integer, minimum: 1 }
         autor: { type: string }
-        comentario: { type: [string, 'null'] }
+        comentario: { type: [string, 'null'], description: null cuando no se envió al publicar o guardar. }
         fecha: { type: string, format: date-time }
         archivos: { $ref: '#/components/schemas/ArchivosConfiguracion' }
 
@@ -1223,7 +1232,7 @@ components:
       properties:
         archivos: { $ref: '#/components/schemas/ArchivosConfiguracion' }
         autor: { type: string, maxLength: 100, description: Quién publica (usuario de la consola). }
-        comentario: { type: string, maxLength: 500, description: Qué cambió en esta versión. }
+        comentario: { type: string, maxLength: 500, description: Opcional. Qué cambió en esta versión; si no se envía, la versión queda con comentario null. }
 
     ConfiguracionPublicadaResponse:
       type: object
@@ -1239,7 +1248,7 @@ components:
       properties:
         ambito: { type: string }
         autor: { type: string }
-        comentario: { type: [string, 'null'] }
+        comentario: { type: [string, 'null'], description: null cuando no se envió al publicar o guardar. }
         fecha: { type: string, format: date-time, description: Último guardado. }
         archivos: { $ref: '#/components/schemas/ArchivosConfiguracion' }
 
@@ -1249,7 +1258,7 @@ components:
       properties:
         archivos: { $ref: '#/components/schemas/ArchivosConfiguracion' }
         autor: { type: string, maxLength: 100 }
-        comentario: { type: string, maxLength: 500 }
+        comentario: { type: string, maxLength: 500, description: Opcional; si no se envía queda null. }
 
     BorradorGuardadoResponse:
       type: object

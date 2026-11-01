@@ -1,6 +1,7 @@
 package pe.cobranza.api.configuracionagente;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Nationalized;
 
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -32,6 +33,7 @@ public class ConfigAgenteVersion {
     @CollectionTable(name = "config_agente_version_archivo", joinColumns = @JoinColumn(name = "version_id"))
     @MapKeyColumn(name = "nombre", length = 32, nullable = false)
     @Lob
+    @Nationalized // nvarchar(max) en SQL Server, como en specs/sql/config_agente.sql
     @Column(name = "contenido", nullable = false)
     private Map<String, String> archivos = new LinkedHashMap<>();
 
