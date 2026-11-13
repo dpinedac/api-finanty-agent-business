@@ -96,6 +96,7 @@ Los tramos de descuento y la reducción por cuotas son listas y se mantienen en 
 | GET | `/api/v1/deudas/{documento}` | Deudas del cliente (producto, entidad de origen, saldo total, días de mora, estado) |
 | POST | `/api/v1/ofertas/calcular` | Descuento y cuotas según política para `documento`, `deudaId` y `cuotas` |
 | POST | `/api/v1/promesas` | Registra promesa de pago; el monto se recalcula en el servidor y la deuda pasa a `CON_PROMESA` |
+| POST | `/api/v1/promesas/campana` | Registra la promesa sobre la campaña de CobraTwo de la deuda (por defecto prioridad 1, `COBRANZA_GENERAL`): el servidor recalcula el monto preaprobado, admite de 1 a las cuotas de la campaña y la guarda en `promesa_campana` de la BD propia. Es la que usa el negociador; nada se escribe en CNTSEC |
 | POST | `/api/v1/rellamadas` | Agenda rellamada con `fechaHora` futura; nace en estado `PENDIENTE` |
 | GET | `/api/v1/rellamadas?pendientes=true&desde=&hasta=` | Rellamadas para que el discador reprograme. `pendientes` filtra por estado `PENDIENTE`; `desde`/`hasta` acotan `fechaHora` (ISO, inclusivo) |
 | POST | `/api/v1/llamadas` | Inicio de llamada: `callId`, `documento`, `telefono`, `perfil` (`validador`, `seguimiento`, `negociador`), `campana` y `guionHash` opcionales. `201`; `409` si el `callId` ya existe |

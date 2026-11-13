@@ -64,6 +64,28 @@ BEGIN
     CREATE INDEX IX_promesa_pago_call_id ON dbo.promesa_pago (call_id);
 END;
 
+-- promesa_campana: promesa sobre la campaña de CobraTwo de la deuda (entidad PromesaCampana). La deuda y la
+-- campaña viven en CNTSEC; aquí solo van sus identificadores y los montos calculados al registrar.
+IF OBJECT_ID('dbo.promesa_campana') IS NULL
+BEGIN
+    CREATE TABLE dbo.promesa_campana (
+        id                BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_promesa_campana PRIMARY KEY,
+        documento         NVARCHAR(15)  NOT NULL,
+        deuda_id          BIGINT        NOT NULL,  -- TM15NDEUID de CobraTwo
+        operacion         BIGINT        NULL,
+        campana_id        INT           NOT NULL,  -- TM16NCPNID de CobraTwo
+        moneda            NVARCHAR(10)  NOT NULL,  -- SOLES | DOLARES | OTRA
+        cuotas            INT           NOT NULL,
+        monto_total       NUMERIC(12,2) NOT NULL,
+        monto_cuota       NUMERIC(12,2) NOT NULL,
+        fecha_primer_pago DATE          NOT NULL,
+        call_id           NVARCHAR(255) NULL,      -- correlación con la llamada del discador
+        creada_en         DATETIME2     NULL
+    );
+    CREATE INDEX IX_promesa_campana_documento ON dbo.promesa_campana (documento);
+    CREATE INDEX IX_promesa_campana_call_id ON dbo.promesa_campana (call_id);
+END;
+
 -- ---------------------------------------------------------------------------------------------------------
 -- llamada / evento_llamada / resultado_llamada: ciclo de vida de la llamada con agente IA
 -- (entidades Llamada, EventoLlamada, ResultadoLlamada). Se correlacionan por call_id, sin FK entre ellas:
