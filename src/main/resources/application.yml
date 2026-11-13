@@ -38,6 +38,16 @@ cntsec:
     deuda-vigente: 417          # TIP_SIT_VIG
     negociacion-vigente: 554    # TIP_STNEG_VIG
     cliente-fallecido: 423      # TIP_SIT_FA
+    registro-activo: 3          # EST_REG_ACT (estado de la campaña y de la asignación deuda-campaña)
+    campana-general: 1885       # TIP_CAMP_COBGEN
+    campana-digital: 1886       # TIP_CAMP_COBDIG
+    descuento-formula: 413      # TIP_DES_FRM
+    descuento-fijo: 414         # TIP_DES_FIJ
+    descuento-libre: 415        # TIP_DES_LBR
+    moneda-soles: 411           # TIP_MON_SOL
+    moneda-dolares: 410         # TIP_MON_DOL
+  # Tipo de cambio que se usa cuando TMP_TIPOCAMBIOSUNAT no tiene el del día (igual que CobraTwo)
+  tipo-cambio-por-defecto: ${CNTSEC_TIPO_CAMBIO_DEFECTO:3.2}
   # La única escritura en CNTSEC es la tabla propia del agente AGENTEIATT01 (specs/sql/AGENTEIATT01.sql).
 
 cobranza:

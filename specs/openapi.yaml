@@ -120,6 +120,76 @@ paths:
         '401':
           $ref: '#/components/responses/NoAutorizado'
 
+  /api/v1/clientes/{documento}/campanas:
+    get:
+      tags: [Clientes]
+      operationId: listarCampanasCliente
+      summary: Campaña de CobraTwo de la prioridad pedida (por defecto 1) para cada deuda vigente
+      description: |
+        Lee de CNTSEC la asignación deuda–campaña (COBTT15), la campaña (COBTM16) y su descuento (COBTM14).
+        Devuelve, por cada deuda **vigente** del cliente, las campañas asignadas con la `prioridad` indicada
+        que estén activas: asignación y campaña en estado activo (3). **El estado es lo único que define la
+        vigencia**; las fechas de la campaña son informativas y una campaña activa con fecha de fin pasada se entrega.
+
+        Una deuda suele tener **una campaña de prioridad 1 por tipo** (`COBRANZA_GENERAL` y `COBRANZA_DIGITAL`):
+        usa `tipo` para quedarte con una sola. Sin campañas que cumplan, la lista llega vacía.
+
+        Es dato de deuda: el agente solo debe invocarlo después de una verificación exitosa.
+
+        `oferta` trae el **monto preaprobado** y el **porcentaje de descuento** ya calculados en el servidor con
+        las mismas definiciones que CobraTwo (`TM_ClienteDeuda.getTM15NDEUPREAPR`): los pagos válidos (COBTT03,
+        convertidos a la moneda de la deuda con el tipo de cambio del día) se descuentan de la deuda, cubren
+        primero los intereses y solo el exceso reduce el capital; sobre esos saldos se evalúa la fórmula de la
+        campaña. Si la fórmula no se puede evaluar, `montoPreaprobado` llega en null: nunca se inventa un monto.
+
+        Las campañas con factor 1.00 ("sin campaña": se cobra la deuda total) no tienen descuento que comunicar:
+        `porcentajeDescuento` llega en null y solo vale `montoPreaprobado`.
+
+        Es la **única fuente** de deuda y oferta para el agente negociador; la promesa se registra con
+        `POST /api/v1/promesas/campana`.
+      parameters:
+        - $ref: '#/components/parameters/Documento'
+        - name: prioridad
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, default: 1 }
+          description: Prioridad de la campaña dentro de la deuda (`TT15NPRIO`); 1 es la principal.
+        - name: tipo
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/TipoCampana'
+          description: Si se envía, solo campañas de ese tipo.
+      responses:
+        '200':
+          description: Campañas encontradas (lista vacía si ninguna deuda vigente tiene una).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CampanaDeuda'
+              example:
+                - deudaId: 101
+                  operacion: 90000001
+                  entidad: Banco Ejemplo
+                  cartera: Cartera 2019
+                  prioridad: 1
+                  campanaId: 1136
+                  nombre: C_OFF_01_45%
+                  descripcion: Cancelación con 45% de descuento
+                  tipo: COBRANZA_DIGITAL
+                  vigenteDesde: '2026-11-01'
+                  vigenteHasta: '2026-11-30'
+                  descuento: { descuentoId: 954, tipo: FORMULA, cuotasMaximas: 1, formula: '(fSaldoCapital*(1-0.45))', factor: 0.45, montoFijo: null }
+                  oferta: { moneda: SOLES, deudaActual: 2950.00, capitalActual: 2950.00, interesTotal: 1650.00, montoPreaprobado: 1622.50, porcentajeDescuento: 45.00, cuotas: 1, cuotaMensual: 1622.50 }
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+
   /api/v1/deudas/{documento}:
     get:
       tags: [Deudas]
@@ -958,6 +1028,62 @@ components:
         nombre: { type: [string, 'null'], description: Nombres del cliente solo si se validó. }
         intentosRestantes: { type: integer }
         mensaje: { type: string }
+
+    TipoCampana:
+      type: string
+      description: "Tipo de campaña de CobraTwo: cobranza general (TIP_CAMP_COBGEN) o digital (TIP_CAMP_COBDIG). `OTRO` si el id no está en el catálogo configurado."
+      enum: [COBRANZA_GENERAL, COBRANZA_DIGITAL, OTRO]
+
+    TipoDescuento:
+      type: string
+      description: "Cómo define CobraTwo el descuento: `FORMULA` (TIP_DES_FRM), `FIJO` (TIP_DES_FIJ, monto fijo a pagar) o `LIBRE` (TIP_DES_LBR). `OTRO` si el id no está en el catálogo configurado."
+      enum: [FORMULA, FIJO, LIBRE, OTRO]
+
+    DescuentoCampana:
+      type: object
+      required: [descuentoId, tipo]
+      properties:
+        descuentoId: { type: integer }
+        tipo: { $ref: '#/components/schemas/TipoDescuento' }
+        cuotasMaximas: { type: [integer, 'null'], description: Número máximo de cuotas que admite la campaña. }
+        formula: { type: [string, 'null'], example: '(fSaldoCapital*(1-0.45))', description: Fórmula de CobraTwo, sin evaluar. }
+        factor: { type: [number, 'null'], format: decimal, example: 0.45, description: Factor de la fórmula (0.45 = 45%). }
+        montoFijo: { type: [number, 'null'], format: decimal, example: 720.00, description: Monto a pagar cuando el tipo es `FIJO`. }
+
+    OfertaCampana:
+      type: object
+      required: [moneda, deudaActual, capitalActual, interesTotal]
+      description: Saldos de la deuda y oferta de la campaña, calculados en el servidor. Montos en la moneda de la deuda.
+      properties:
+        moneda: { type: string, enum: [SOLES, DOLARES, OTRA] }
+        deudaActual: { type: number, format: decimal, description: Deuda inicial + interés legal − pagos (`fTotalDeuda`). }
+        capitalActual: { type: number, format: decimal, description: Capital inicial menos lo pagado por encima de los intereses (`fSaldoCapital`). }
+        interesTotal: { type: number, format: decimal, description: Interés inicial + moratorio + compensatorio (`fTotalIntereses`). }
+        montoPreaprobado: { type: [number, 'null'], format: decimal, example: 1622.50, description: Monto a pagar según la fórmula de la campaña; null si la fórmula no se pudo evaluar. }
+        porcentajeDescuento: { type: [number, 'null'], format: decimal, example: 45.00, description: 'Porcentaje de descuento de la campaña; null en las de monto fijo y en las de factor 1.00 ("sin campaña"), donde solo vale el monto.' }
+        cuotas: { type: [integer, 'null'], description: Cuotas de la campaña. }
+        cuotaMensual: { type: [number, 'null'], format: decimal, description: Monto preaprobado entre las cuotas. }
+
+    CampanaDeuda:
+      type: object
+      required: [deudaId, prioridad, campanaId, nombre, tipo, oferta]
+      properties:
+        deudaId: { type: integer, format: int64, description: Id de la deuda en CobraTwo (TM15NDEUID). }
+        operacion: { type: [integer, 'null'], format: int64, description: Número de operación de la deuda. }
+        entidad: { type: [string, 'null'], description: Entidad de origen de la deuda (COBTM01). }
+        cartera: { type: [string, 'null'], description: Cartera a la que pertenece la deuda (COBTM07). }
+        prioridad: { type: integer }
+        campanaId: { type: integer }
+        nombre: { type: string }
+        descripcion: { type: [string, 'null'] }
+        tipo: { $ref: '#/components/schemas/TipoCampana' }
+        vigenteDesde: { type: [string, 'null'], format: date, description: Informativa; no filtra. }
+        vigenteHasta: { type: [string, 'null'], format: date, description: Informativa; no filtra. null cuando la campaña no tiene fecha de fin. }
+        descuento:
+          oneOf:
+            - $ref: '#/components/schemas/DescuentoCampana'
+            - type: 'null'
+        oferta: { $ref: '#/components/schemas/OfertaCampana' }
 
     Deuda:
       type: object

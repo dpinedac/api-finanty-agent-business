@@ -5,10 +5,14 @@ import jakarta.validation.constraints.NotBlank;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import pe.cobranza.api.cntsec.CampanaCntsecRepositorio;
+import pe.cobranza.api.cntsec.CampanaCntsecRepositorio.CampanaDeuda;
+import pe.cobranza.api.cntsec.CampanaCntsecRepositorio.TipoCampana;
 import pe.cobranza.api.cntsec.ClienteCntsec;
 import pe.cobranza.api.cntsec.ClienteCntsecRepositorio;
 import pe.cobranza.api.config.ErrorHandler.NegocioException;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -26,13 +30,16 @@ public class ClienteController {
     /** Dígitos iniciales del documento que debe decir el cliente; COBRANZA_DIGITOS_DOCUMENTO. */
     private final int digitosDocumento;
     private final ClienteCntsecRepositorio clientes;
+    private final CampanaCntsecRepositorio campanas;
     /** Intentos fallidos por llamada. En producción iría a Redis. */
     private final Map<String, Integer> intentos = new ConcurrentHashMap<>();
 
     public ClienteController(ClienteCntsecRepositorio clientes,
+                             CampanaCntsecRepositorio campanas,
                              @Value("${cobranza.validacion.max-intentos:3}") int maxIntentos,
                              @Value("${cobranza.validacion.digitos-documento:4}") int digitosDocumento) {
         this.clientes = clientes;
+        this.campanas = campanas;
         this.maxIntentos = maxIntentos;
         this.digitosDocumento = digitosDocumento;
     }
@@ -61,6 +68,23 @@ public class ClienteController {
         var motivo = motivoNoLlamable(c);
         return new ClienteResumen(c.documento(), c.nombreCompleto(), textoONulo(c.nombres()), textoONulo(c.apellidos()),
                 motivo == null, motivo);
+    }
+
+    /**
+     * Campaña de CobraTwo de la prioridad pedida (1 por defecto) para cada deuda vigente del cliente.
+     * Una deuda suele tener una por tipo (general y digital): {@code tipo} deja solo las de ese tipo.
+     */
+    @GetMapping("/{documento}/campanas")
+    public List<CampanaDeuda> campanas(@PathVariable String documento,
+                                       @RequestParam(defaultValue = "1") int prioridad,
+                                       @RequestParam(required = false) TipoCampana tipo) {
+        if (prioridad < 1) {
+            throw new NegocioException(HttpStatus.BAD_REQUEST, "prioridad: debe ser 1 o mayor");
+        }
+        buscar(documento);
+        return campanas.porDocumento(documento, prioridad).stream()
+                .filter(c -> tipo == null || c.tipo() == tipo)
+                .toList();
     }
 
     @PostMapping("/verificar")
