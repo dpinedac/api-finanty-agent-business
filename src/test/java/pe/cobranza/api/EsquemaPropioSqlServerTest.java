@@ -115,10 +115,10 @@ class EsquemaPropioSqlServerTest {
     }
 
     @Test
-    @DisplayName("esquema_propio.sql cubre las siete tablas del núcleo y no incluye las del depósito de configuración (obsoleto)")
+    @DisplayName("esquema_propio.sql cubre las ocho tablas del núcleo y no incluye las del depósito de configuración (obsoleto)")
     void esquemaPropioSoloNucleo() throws IOException {
         assertThat(columnasDelScript(SCRIPT).keySet()).containsExactly("cliente", "deuda", "evento_llamada", "llamada",
-                "promesa_pago", "rellamada", "resultado_llamada");
+                "promesa_campana", "promesa_pago", "rellamada", "resultado_llamada");
     }
 
     // ---------- utilidades ----------
@@ -133,7 +133,7 @@ class EsquemaPropioSqlServerTest {
                 clases.add(Class.forName(bd.getBeanClassName()));
             }
         }
-        assertThat(clases).hasSize(7);
+        assertThat(clases).hasSize(8);
         return clases;
     }
 

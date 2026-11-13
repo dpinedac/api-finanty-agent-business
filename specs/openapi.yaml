@@ -319,6 +319,60 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+
+  /api/v1/promesas/campana:
+    post:
+      tags: [Promesas]
+      operationId: registrarPromesaCampana
+      summary: Registra una promesa de pago sobre la campaña de CobraTwo de la deuda
+      description: |
+        La deuda y la oferta salen solo de CobraTwo: el servidor vuelve a leer la campaña de la deuda (por defecto
+        la de prioridad 1 y tipo `COBRANZA_GENERAL`) y recalcula el monto preaprobado; el agente no envía montos.
+        `cuotas` va de 1 (contado) a las cuotas de la campaña y la cuota es el monto preaprobado entre `cuotas`.
+        La promesa se guarda en la BD propia de la API (`promesa_campana`); no se escribe nada en CNTSEC.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromesaCampanaRequest'
+            example:
+              documento: '45879632'
+              deudaId: 101
+              cuotas: 1
+              fechaPrimerPago: '2026-11-20'
+              callId: 7c6a1e8e-3a0d-4f0b-9b61-2d1b8f0c9e11
+      responses:
+        '200':
+          description: Promesa registrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromesaCampanaResponse'
+              example:
+                promesaId: 1
+                deudaId: 101
+                operacion: 90000001
+                campanaId: 801
+                moneda: SOLES
+                cuotas: 1
+                montoTotal: 1622.50
+                montoCuota: 1622.50
+                fechaPrimerPago: '2026-11-20'
+                mensaje: Promesa de pago registrada.
+        '400':
+          $ref: '#/components/responses/DatosInvalidos'
+        '401':
+          $ref: '#/components/responses/NoAutorizado'
+        '404':
+          $ref: '#/components/responses/NoEncontrado'
+        '409':
+          description: La campaña de la deuda no tiene un monto preaprobado calculable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/v1/rellamadas:
     post:
       tags: [Rellamadas]
@@ -1135,6 +1189,36 @@ components:
         promesaId: { type: integer, format: int64 }
         cuotas: { type: integer }
         montoTotal: { type: number, format: decimal }
+        montoCuota: { type: number, format: decimal }
+        fechaPrimerPago: { type: string, format: date }
+        mensaje: { type: string }
+
+    PromesaCampanaRequest:
+      type: object
+      required: [documento, deudaId, cuotas, fechaPrimerPago]
+      properties:
+        documento: { type: string }
+        deudaId: { type: integer, format: int64, description: "Id de la deuda en CobraTwo (TM15NDEUID), como lo entrega `/clientes/{documento}/campanas`." }
+        cuotas: { type: integer, minimum: 1, description: Entre 1 (pago al contado) y las cuotas de la campaña. }
+        fechaPrimerPago: { type: string, format: date, description: Entre hoy y el plazo máximo configurado. }
+        callId: { type: string }
+        prioridad: { type: integer, minimum: 1, default: 1, description: Prioridad de la campaña sobre la que se promete. }
+        tipo:
+          allOf:
+            - $ref: '#/components/schemas/TipoCampana'
+          default: COBRANZA_GENERAL
+
+    PromesaCampanaResponse:
+      type: object
+      required: [promesaId, deudaId, campanaId, moneda, cuotas, montoTotal, montoCuota, fechaPrimerPago, mensaje]
+      properties:
+        promesaId: { type: integer, format: int64 }
+        deudaId: { type: integer, format: int64 }
+        operacion: { type: [integer, 'null'], format: int64 }
+        campanaId: { type: integer }
+        moneda: { type: string, enum: [SOLES, DOLARES, OTRA] }
+        cuotas: { type: integer }
+        montoTotal: { type: number, format: decimal, description: Monto preaprobado de la campaña al momento de la promesa. }
         montoCuota: { type: number, format: decimal }
         fechaPrimerPago: { type: string, format: date }
         mensaje: { type: string }
