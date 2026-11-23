@@ -79,12 +79,13 @@ class ClienteControllerTest extends PruebaApi {
     }
 
     @Test
-    @DisplayName("GET /clientes/{documento}/campanas devuelve por defecto las campañas de prioridad 1 activas (estado 3), sin mirar fechas")
+    @DisplayName("GET /clientes/{documento}/campanas devuelve por defecto solo la campaña general de prioridad 1 activa (estado 3), sin mirar fechas")
     void campanasDePrioridadUno() throws Exception {
         mvc.perform(getJson("/api/v1/clientes/45879632/campanas"))
                 .andExpect(status().isOk())
-                // Fuera: prioridad 2, campaña inactiva y asignación inactiva
-                .andExpect(jsonPath("$", hasSize(3)))
+                // Por defecto solo COBRANZA_GENERAL: quedan fuera las digitales (802, 804),
+                // la prioridad 2, la campaña inactiva y la asignación inactiva.
+                .andExpect(jsonPath("$", hasSize(1)))
                 .andExpect(jsonPath("$[0].deudaId").value(101))
                 .andExpect(jsonPath("$[0].operacion").value(90000001))
                 .andExpect(jsonPath("$[0].entidad").value("Banco Ejemplo"))
@@ -99,15 +100,7 @@ class ClienteControllerTest extends PruebaApi {
                 .andExpect(jsonPath("$[0].descuento.cuotasMaximas").value(1))
                 .andExpect(jsonPath("$[0].descuento.formula").value("(fSaldoCapital*(1-0.45))"))
                 .andExpect(jsonPath("$[0].descuento.factor").value(0.45))
-                .andExpect(jsonPath("$[0].descuento.montoFijo").doesNotExist())
-                .andExpect(jsonPath("$[1].campanaId").value(802))
-                .andExpect(jsonPath("$[1].tipo").value("COBRANZA_DIGITAL"))
-                .andExpect(jsonPath("$[1].vigenteHasta").value("2099-12-31"))
-                .andExpect(jsonPath("$[1].descuento.tipo").value("FIJO"))
-                .andExpect(jsonPath("$[1].descuento.montoFijo").value(720))
-                // Activa con fecha de fin pasada: el estado 3 manda
-                .andExpect(jsonPath("$[2].campanaId").value(804))
-                .andExpect(jsonPath("$[2].vigenteHasta").value("2020-12-31"));
+                .andExpect(jsonPath("$[0].descuento.montoFijo").doesNotExist());
     }
 
     @Test
@@ -156,7 +149,15 @@ class ClienteControllerTest extends PruebaApi {
         mvc.perform(getJson("/api/v1/clientes/45879632/campanas?tipo=COBRANZA_DIGITAL"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(2)))
-                .andExpect(jsonPath("$[0].campanaId").value(802));
+                .andExpect(jsonPath("$[0].campanaId").value(802))
+                .andExpect(jsonPath("$[0].tipo").value("COBRANZA_DIGITAL"))
+                .andExpect(jsonPath("$[0].vigenteHasta").value("2099-12-31"))
+                .andExpect(jsonPath("$[0].descuento.tipo").value("FIJO"))
+                .andExpect(jsonPath("$[0].descuento.montoFijo").value(720))
+                // Activa con fecha de fin pasada: el estado 3 manda sobre la fecha
+                .andExpect(jsonPath("$[1].campanaId").value(804))
+                .andExpect(jsonPath("$[1].tipo").value("COBRANZA_DIGITAL"))
+                .andExpect(jsonPath("$[1].vigenteHasta").value("2020-12-31"));
         mvc.perform(getJson("/api/v1/clientes/45879632/campanas?prioridad=2"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))

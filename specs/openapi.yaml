@@ -131,8 +131,9 @@ paths:
         que estén activas: asignación y campaña en estado activo (3). **El estado es lo único que define la
         vigencia**; las fechas de la campaña son informativas y una campaña activa con fecha de fin pasada se entrega.
 
-        Una deuda suele tener **una campaña de prioridad 1 por tipo** (`COBRANZA_GENERAL` y `COBRANZA_DIGITAL`):
-        usa `tipo` para quedarte con una sola. Sin campañas que cumplan, la lista llega vacía.
+        Una deuda suele tener **una campaña de prioridad 1 por tipo** (`COBRANZA_GENERAL` y `COBRANZA_DIGITAL`).
+        Por defecto solo se devuelve `COBRANZA_GENERAL` (la que lleva el descuento), para que una misma deuda no
+        llegue duplicada; usa `tipo` para pedir explícitamente otro tipo. Sin campañas que cumplan, la lista llega vacía.
 
         Es dato de deuda: el agente solo debe invocarlo después de una verificación exitosa.
 
@@ -158,8 +159,10 @@ paths:
           in: query
           required: false
           schema:
-            $ref: '#/components/schemas/TipoCampana'
-          description: Si se envía, solo campañas de ese tipo.
+            allOf:
+              - $ref: '#/components/schemas/TipoCampana'
+            default: COBRANZA_GENERAL
+          description: Tipo de campaña a devolver. Por defecto `COBRANZA_GENERAL`; envía otro valor para cambiarlo.
       responses:
         '200':
           description: Campañas encontradas (lista vacía si ninguna deuda vigente tiene una).

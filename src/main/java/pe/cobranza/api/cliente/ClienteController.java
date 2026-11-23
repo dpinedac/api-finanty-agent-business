@@ -72,12 +72,14 @@ public class ClienteController {
 
     /**
      * Campaña de CobraTwo de la prioridad pedida (1 por defecto) para cada deuda vigente del cliente.
-     * Una deuda suele tener una por tipo (general y digital): {@code tipo} deja solo las de ese tipo.
+     * Una deuda suele tener una por tipo (general y digital). Por defecto se devuelve solo
+     * {@code COBRANZA_GENERAL} (la que lleva el descuento) para que una misma deuda no llegue
+     * duplicada a quien consume el endpoint; {@code tipo} permite pedir explícitamente otro tipo.
      */
     @GetMapping("/{documento}/campanas")
     public List<CampanaDeuda> campanas(@PathVariable String documento,
                                        @RequestParam(defaultValue = "1") int prioridad,
-                                       @RequestParam(required = false) TipoCampana tipo) {
+                                       @RequestParam(defaultValue = "COBRANZA_GENERAL") TipoCampana tipo) {
         if (prioridad < 1) {
             throw new NegocioException(HttpStatus.BAD_REQUEST, "prioridad: debe ser 1 o mayor");
         }
