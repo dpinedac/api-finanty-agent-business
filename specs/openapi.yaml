@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: business-api · API de negocio de cobranza
-  version: 0.2.0
+  version: 0.3.0
   summary: Reglas de negocio y único escritor en base de datos del agente conversacional de cobranza.
   description: |
     API consumida por **agent-voice** (perfiles validador, seguimiento y negociador) y por **back-discador**
@@ -1011,6 +1011,8 @@ components:
       description: |
         Catálogo de tipificaciones del agente. Las ocho primeras existían desde la fase 1;
         `CONTACTO_VALIDADO`, `NO_EXISTE`, `INFORMADO` y `PROMESA_SIMPLE` se agregaron para el validador y el seguimiento.
+        `SIN_RESPUESTA` (0.3.0): contestó pero nadie respondió en toda la llamada; lo registra el runtime del agente
+        al cerrar por silencio, nunca el LLM.
         El mapeo a las tipificaciones del discador (CONTACTO, AGENDAMIENTO, CONTACTO_INDIRECTO, NO_CONTACTO) vive en back-discador.
       enum:
         - PROMESA_PAGO
@@ -1025,6 +1027,7 @@ components:
         - NO_EXISTE
         - INFORMADO
         - PROMESA_SIMPLE
+        - SIN_RESPUESTA
 
     ResultadoValidacionTelefono:
       type: string

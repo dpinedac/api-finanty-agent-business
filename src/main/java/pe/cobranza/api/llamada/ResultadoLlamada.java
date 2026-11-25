@@ -9,11 +9,13 @@ public class ResultadoLlamada {
     /**
      * Catálogo de tipificaciones del agente. Las ocho primeras son de la fase 1;
      * CONTACTO_VALIDADO, NO_EXISTE, INFORMADO y PROMESA_SIMPLE se agregaron para el validador y el seguimiento.
+     * SIN_RESPUESTA: contesto pero nadie respondio en toda la llamada; lo registra el runtime del agente al
+     * cerrar por silencio, nunca el LLM (aditivo, contrato 0.3.0).
      * El mapeo a las tipificaciones del discador vive en back-discador.
      */
     public enum Tipificacion {
         PROMESA_PAGO, RELLAMADA, RECHAZO, TERCERO, NUMERO_EQUIVOCADO, TRANSFERIDO, SIN_VALIDAR, OTRO,
-        CONTACTO_VALIDADO, NO_EXISTE, INFORMADO, PROMESA_SIMPLE
+        CONTACTO_VALIDADO, NO_EXISTE, INFORMADO, PROMESA_SIMPLE, SIN_RESPUESTA
     }
 
     @Id @GeneratedValue(strategy = GenerationType.IDENTITY)

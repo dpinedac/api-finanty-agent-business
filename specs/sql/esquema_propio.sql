@@ -126,7 +126,7 @@ BEGIN
         id                   BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_resultado_llamada PRIMARY KEY,
         call_id              NVARCHAR(255)  NULL,
         documento            NVARCHAR(255)  NULL,
-        tipificacion         NVARCHAR(255)  NULL,  -- catálogo Tipificacion (12 valores, crece de forma aditiva)
+        tipificacion         NVARCHAR(255)  NULL,  -- catálogo Tipificacion (13 valores, crece de forma aditiva)
         resumen              NVARCHAR(2000) NULL,
         guion_hash           NVARCHAR(64)   NULL,
         transcripcion        NVARCHAR(MAX)  NULL,  -- conversación completa
